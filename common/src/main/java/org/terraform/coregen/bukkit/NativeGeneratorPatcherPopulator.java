@@ -1,0 +1,156 @@
+package org.terraform.coregen.bukkit;
+
+import org.bukkit.Bukkit;
+import org.bukkit.Chunk;
+import org.bukkit.World;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.world.ChunkLoadEvent;
+import org.bukkit.event.world.WorldUnloadEvent;
+import org.bukkit.generator.BlockPopulator;
+import org.jetbrains.annotations.NotNull;
+import org.terraform.data.SimpleChunkLocation;
+import org.terraform.main.TerraformGeneratorPlugin;
+import org.terraform.main.config.TConfig;
+import org.terraform.utils.BlockUtils;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class NativeGeneratorPatcherPopulator extends BlockPopulator implements Listener {
+
+    // SimpleChunkLocation to a collection of location:blockdata entries marked for repair.
+    private static final @NotNull Map<SimpleChunkLocation, Collection<Object[]>> cache = new ConcurrentHashMap<>();
+    private static boolean flushIsQueued = false;
+
+    public NativeGeneratorPatcherPopulator() {
+        // this.tw = tw;
+        Bukkit.getPluginManager().registerEvents(this, TerraformGeneratorPlugin.get());
+    }
+
+    public static void pushChange(String world, int x, int y, int z, BlockData data) {
+
+        if (!flushIsQueued && cache.size() > TConfig.c.DEVSTUFF_FLUSH_PATCHER_CACHE_FREQUENCY) {
+            flushIsQueued = true;
+
+            TerraformGeneratorPlugin.taskScheduler.execSyncRegion(
+                    Objects.requireNonNull(Bukkit.getWorld(world)),
+                x<<4,z<<4, () -> {
+                    flushChanges();
+                    flushIsQueued = false;
+                }
+            );
+        }
+
+        SimpleChunkLocation scl = new SimpleChunkLocation(world, x, y, z);
+        Collection<Object[]> cached = cache.getOrDefault(scl,new ArrayList<>());
+        //        cacheContents.put(data.getMaterial(), cacheContents.getOrDefault(data.getMaterial(),0)+1);
+        cached.add(new Object[] {
+                new int[] {x, y, z}, data
+        });
+        cache.put(scl, cached);
+    }
+
+    public static void flushChanges() {
+        if (cache.isEmpty()) {
+            return;
+        }
+        TerraformGeneratorPlugin.logger.info("[NativeGeneratorPatcher] Flushing repairs ("
+                                             + cache.size()
+                                             + " chunks), pushed by cache size");
+        ArrayList<SimpleChunkLocation> locs = new ArrayList<>(cache.keySet());
+        for (SimpleChunkLocation scl : locs) {
+            World w = Bukkit.getWorld(scl.getWorld());
+            if (w == null) {
+                continue;
+            }
+            if (w.isChunkLoaded(scl.getX(), scl.getZ())) {
+                // TerraformGeneratorPlugin.logger.info("[NativeGeneratorPatcher]   - Flushing changes to loaded chunk...");
+                Collection<Object[]> changes = cache.remove(scl);
+                if (changes != null) {
+                    for (Object[] entry : changes) {
+                        applyChange(w, entry);
+                    }
+                }
+            }
+            else {
+                // Let the event handler do it
+                // TerraformGeneratorPlugin.logger.info("[NativeGeneratorPatcher]   - Loading a chunk to flush changes...");
+                w.loadChunk(scl.getX(), scl.getZ());
+            }
+        }
+    }
+
+    @Override
+    public void populate(@NotNull World world, @NotNull Random random, @NotNull Chunk chunk) {
+        SimpleChunkLocation scl = new SimpleChunkLocation(chunk);
+        Collection<Object[]> changes = cache.remove(scl);
+        if (changes != null) {
+            // TerraformGeneratorPlugin.logger.info("[NativeGeneratorPatcher] Flushing repairs (" + cache.size() + " chunks), pushed by BlockPopulator");
+            for (Object[] entry : changes) {
+                applyChange(world, entry);
+            }
+        }
+    }
+
+    @EventHandler
+    public void onChunkLoad(@NotNull ChunkLoadEvent event) {
+        SimpleChunkLocation scl = new SimpleChunkLocation(event.getChunk());
+        Collection<Object[]> changes = cache.remove(scl);
+        if (changes != null) {
+            // TerraformGeneratorPlugin.logger.info("[NativeGeneratorPatcher] Flushing repairs for 1 chunk (" + scl.getX() + "," + scl.getZ() + "), pushed by chunkloadevent");
+            for (Object[] entry : changes) {
+                applyChange(event.getChunk().getWorld(), entry);
+            }
+        }
+    }
+
+    @EventHandler
+    public void onWorldUnload(@NotNull WorldUnloadEvent event) {
+        TerraformGeneratorPlugin.logger.info("[NativeGeneratorPatcher] Flushing repairs for "
+                                             + event.getWorld()
+                                                    .getName()
+                                             + " ("
+                                             + cache.size()
+                                             + " chunks in cache), triggered by world unload");
+
+        int processed = 0;
+        for (SimpleChunkLocation scl : cache.keySet()) {
+            if (!scl.getWorld().equals(event.getWorld().getName())) {
+                continue;
+            }
+            Collection<Object[]> changes = cache.get(scl);
+            if (changes != null) {
+                for (Object[] entry : changes) {
+                    applyChange(event.getWorld(), entry);
+                }
+            }
+
+            processed++;
+            if (processed % 20 == 0) {
+                TerraformGeneratorPlugin.logger.info("[NativeGeneratorPatcher] Processed "
+                                                     + processed
+                                                     + "/"
+                                                     + cache.size()
+                                                     + " chunks");
+            }
+        }
+    }
+
+    private static void applyChange(@NotNull World world, Object @NotNull [] entry) {
+        int[] loc = (int[]) entry[0];
+        BlockData data = (BlockData) entry[1];
+        if (data instanceof org.bukkit.block.data.Waterlogged) {
+            BlockData replacedData = world.getBlockAt(loc[0], loc[1], loc[2]).getBlockData();
+            data = BlockUtils.correctWaterloggedData(
+                    data,
+                    replacedData.getMaterial(),
+                    replacedData,
+                    loc[1]
+            );
+        }
+        world.getBlockAt(loc[0], loc[1], loc[2]).setBlockData(data, false);
+    }
+
+}
