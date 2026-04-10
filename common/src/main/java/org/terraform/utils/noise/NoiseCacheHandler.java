@@ -112,6 +112,7 @@ public class NoiseCacheHandler {
         CAVE_XRAVINE_DETAILS,
         CAVE_YBARRIER_NOISE,
         CAVE_V2_PHASE3A_DENSITY,
+        CAVE_V3_SPAGHETTI_NOISE,
 
         STRUCTURE_LARGECAVE_CARVER,
 

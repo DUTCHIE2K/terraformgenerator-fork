@@ -11,7 +11,9 @@ import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
-import org.terraform.cave.v2.CaveSnapshotStore;
+import org.terraform.cave.v3.BaseSurfaceMapStoreV3;
+import org.terraform.cave.v3.CaveSnapshotStoreV3;
+import org.terraform.cave.v3.EntranceApprovalStore;
 import org.terraform.coregen.ChunkCache;
 import org.terraform.coregen.HeightMap;
 import org.terraform.coregen.NMSInjectorAbstract;
@@ -203,7 +205,7 @@ public class TerraformGeneratorPlugin extends JavaPlugin implements Listener {
                 logger.stdout("&6Trying to decorate "
                               + TerraformGenerator.preWorldInitGen.size()
                               + " pre-maturely generated chunks.");
-                logger.stdout("&6Ambient cave decoration will be skipped for these repaired chunks because no CaveSnapshot is available post-gen.");
+                logger.stdout("&6Ambient cave decoration will be skipped for these repaired chunks because no cave snapshot is available post-gen.");
                 int fixed = 0;
                 TerraformWorld tw = TerraformWorld.get(event.getWorld());
                 for (SimpleChunkLocation sc : TerraformGenerator.preWorldInitGen) {
@@ -248,7 +250,9 @@ public class TerraformGeneratorPlugin extends JavaPlugin implements Listener {
             TerraformWorld tw = TerraformWorld.get(event.getWorld());
             logger.stdout("Flushing noise cache for world " + event.getWorld().getName());
             NoiseCacheHandler.flushNoiseCaches(tw);
-            CaveSnapshotStore.clearWorld(tw);
+            CaveSnapshotStoreV3.clearWorld(tw);
+            BaseSurfaceMapStoreV3.clearWorld(tw);
+            EntranceApprovalStore.clearWorld(tw);
         }
     }
 

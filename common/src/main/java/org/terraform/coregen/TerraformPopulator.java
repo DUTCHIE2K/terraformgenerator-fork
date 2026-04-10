@@ -5,8 +5,8 @@ import org.bukkit.generator.BlockPopulator;
 import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
 import org.terraform.biome.cavepopulators.MasterCavePopulatorDistributor;
-import org.terraform.cave.v2.CaveSnapshot;
-import org.terraform.cave.v2.CaveSnapshotStore;
+import org.terraform.cave.v3.CaveSnapshotStoreV3;
+import org.terraform.cave.v3.CaveSnapshotV3;
 import org.terraform.coregen.populatordata.PopulatorDataAbstract;
 import org.terraform.coregen.populatordata.PopulatorDataPostGen;
 import org.terraform.coregen.populatordata.PopulatorDataSpigotAPI;
@@ -255,12 +255,12 @@ public class TerraformPopulator extends BlockPopulator {
 
         // Cave populators
         // They will recalculate biomes per block.
-        CaveSnapshot snapshot = CaveSnapshotStore.take(tw, data.getChunkX(), data.getChunkZ());
-        if (snapshot == null) {
+        CaveSnapshotV3 snapshotV3 = CaveSnapshotStoreV3.takeGameplay(tw, data.getChunkX(), data.getChunkZ());
+        if (snapshotV3 == null) {
             logMissingCaveSnapshot(tw, data);
         }
         else {
-            caveDistributor.populate(tw, random, data, canDecorate[1], snapshot);
+            caveDistributor.populate(tw, random, data, canDecorate[1], snapshotV3);
         }
 
         // Multi-megachunk structures
@@ -286,10 +286,10 @@ public class TerraformPopulator extends BlockPopulator {
         if (data instanceof PopulatorDataPostGen) {
             TerraformGeneratorPlugin.logger.info("Skipping ambient cave decoration for post-gen repaired "
                                                  + chunkInfo
-                                                 + " because no CaveSnapshot is available.");
+                                                 + " because no cave snapshot is available.");
         }
         else {
-            TerraformGeneratorPlugin.logger.error("Missing CaveSnapshot during ambient cave decoration for "
+            TerraformGeneratorPlugin.logger.error("Missing cave snapshot during ambient cave decoration for "
                                                   + chunkInfo
                                                   + ". Ambient cave decoration was skipped.");
         }

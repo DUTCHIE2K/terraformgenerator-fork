@@ -394,6 +394,8 @@ public class TConfig extends YamlFileInterface {
     public float CAVES_DENSITY_V1_FREQUENCY = 0.035f;
     @YamlKey("caves.density-v1.threshold")
     public float CAVES_DENSITY_V1_THRESHOLD = 0.45f;
+    @YamlKey("caves.density-v1.confidence-scale")
+    public float CAVES_DENSITY_V1_CONFIDENCE_SCALE = 0.4f;
     @YamlKey("caves.density-v1.surface-no-carve-clearance")
     public int CAVES_DENSITY_V1_SURFACE_NO_CARVE_CLEARANCE = 8;
     @YamlKey("caves.density-v1.surface-full-carve-clearance")
@@ -406,6 +408,12 @@ public class TConfig extends YamlFileInterface {
     public int CAVES_DENSITY_V1_SEA_LEVEL_FADE_DEPTH = 6;
     @YamlKey("caves.density-v1.sea-level-max-threshold-penalty")
     public float CAVES_DENSITY_V1_SEA_LEVEL_MAX_THRESHOLD_PENALTY = 0.25f;
+    @YamlKey("caves.density-v1.spaghetti.frequency")
+    public float CAVES_DENSITY_V1_SPAGHETTI_FREQUENCY = 0.007f;
+    @YamlKey("caves.density-v1.spaghetti.threshold")
+    public float CAVES_DENSITY_V1_SPAGHETTI_THRESHOLD = -1.3f;
+    @YamlKey("caves.density-v1.spaghetti.max-depth")
+    public int CAVES_DENSITY_V1_SPAGHETTI_MAX_DEPTH = 50;
     @YamlKey("caves.density-v1.entrances.enabled")
     public boolean CAVES_DENSITY_V1_ENTRANCES_ENABLED = true;
     @YamlKey("caves.density-v1.entrances.spacing")

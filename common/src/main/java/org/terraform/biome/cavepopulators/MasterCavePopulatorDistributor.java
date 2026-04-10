@@ -4,6 +4,11 @@ import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
 import org.terraform.cave.v2.CaveInterval;
 import org.terraform.cave.v2.CaveSnapshot;
+import org.terraform.cave.v3.CaveIntervalMetadata;
+import org.terraform.cave.v3.CaveIntervalV3;
+import org.terraform.cave.v3.CaveResolvedType;
+import org.terraform.cave.v3.CaveSnapshotV3;
+import org.terraform.cave.v3.SurfaceConnectivity;
 import org.terraform.coregen.populatordata.PopulatorDataAbstract;
 import org.terraform.data.CoordPair;
 import org.terraform.data.SimpleBlock;
@@ -31,6 +36,36 @@ public class MasterCavePopulatorDistributor {
                          boolean generateClusters,
                          @NotNull CaveSnapshot snapshot)
     {
+        populateInternal(
+                tw,
+                random,
+                data,
+                generateClusters,
+                (localX, localZ) -> getSnapshotCandidates(snapshot, localX, localZ)
+        );
+    }
+
+    public void populate(@NotNull TerraformWorld tw,
+                         @NotNull Random random,
+                         @NotNull PopulatorDataAbstract data,
+                         boolean generateClusters,
+                         @NotNull CaveSnapshotV3 snapshot)
+    {
+        populateInternal(
+                tw,
+                random,
+                data,
+                generateClusters,
+                (localX, localZ) -> getSnapshotCandidates(snapshot, localX, localZ)
+        );
+    }
+
+    private void populateInternal(@NotNull TerraformWorld tw,
+                                  @NotNull Random random,
+                                  @NotNull PopulatorDataAbstract data,
+                                  boolean generateClusters,
+                                  @NotNull CaveCandidateProvider candidateProvider)
+    {
         HashMap<CoordPair, CaveClusterRegistry> clusters = generateClusters ?
            calculateClusterLocations(
                 random,
@@ -49,15 +84,19 @@ public class MasterCavePopulatorDistributor {
                 // Remove clusters when they're spawned.
                 CaveClusterRegistry reg = clusters.remove(new CoordPair(x, z));
 
-                Collection<CoordPair> pairs = getSnapshotCaveCeilFloors(snapshot, x & 0xF, z & 0xF);
+                List<CaveDecorationCandidate> candidates = candidateProvider.getCandidates(x & 0xF, z & 0xF);
 
                 // This is the index to spawn the cluster in.
-                int clusterPair = !pairs.isEmpty() ? random.nextInt(pairs.size()) : 0;
+                int clusterPair = getClusterCandidateIndex(candidates, random);
 
-                for (CoordPair pair : pairs) {
+                for (CaveDecorationCandidate candidate : candidates) {
+                    CoordPair pair = candidate.pair();
 
                     // Biome disallows caves above this height
                     if (pair.x() > maxHeightForCaves) {
+                        if (isClusterCandidate(candidate)) {
+                            clusterPair--;
+                        }
                         continue;
                     }
 
@@ -71,12 +110,18 @@ public class MasterCavePopulatorDistributor {
                                                            .getType())
                         || BlockUtils.amethysts.contains(ceil.getDown().getType()))
                     {
+                        if (isClusterCandidate(candidate)) {
+                            clusterPair--;
+                        }
                         continue;
                     }
 
                     AbstractCavePopulator pop;
 
-                    if (reg == null && clusterDecoratedPairs.contains(AbstractCaveClusterPopulator.getDecoratedPairKey(
+                    if (candidate.metadata().resolvedType() == CaveResolvedType.ENTRANCE) {
+                        pop = new EmptyCavePopulator();
+                    }
+                    else if (reg == null && clusterDecoratedPairs.contains(AbstractCaveClusterPopulator.getDecoratedPairKey(
                             x,
                             z,
                             pair.x(),
@@ -100,10 +145,12 @@ public class MasterCavePopulatorDistributor {
                          */
                         // If there is no cluster to spawn, then revert to the
                         // basic biome-based cave populator
-                        pop = (clusterPair == 0 && reg != null && TConfig.c.FEATURE_CAVECLUSTERS_ENABLED) ?
+                        pop = (clusterPair == 0 && reg != null && isClusterCandidate(candidate) && TConfig.c.FEATURE_CAVECLUSTERS_ENABLED) ?
                               reg.getPopulator(random) : bank.getCavePop();
                     }
-                    clusterPair--;
+                    if (isClusterCandidate(candidate)) {
+                        clusterPair--;
+                    }
 
                     if(!(pop instanceof AbstractCaveClusterPopulator)
                         && !TConfig.c.FEATURE_CAVEDECORATORS_ENABLED)
@@ -171,20 +218,56 @@ public class MasterCavePopulatorDistributor {
         );
     }
 
-    private static @NotNull Collection<CoordPair> getSnapshotCaveCeilFloors(@NotNull CaveSnapshot snapshot,
-                                                                             int localX,
-                                                                             int localZ)
+    private static @NotNull List<CaveDecorationCandidate> getSnapshotCandidates(@NotNull CaveSnapshot snapshot,
+                                                                                 int localX,
+                                                                                 int localZ)
     {
         List<CaveInterval> intervals = snapshot.getColumn(localX, localZ).getIntervals();
         if (intervals.isEmpty()) {
             return Collections.emptyList();
         }
 
-        List<CoordPair> pairs = new ArrayList<>(intervals.size());
+        List<CaveDecorationCandidate> pairs = new ArrayList<>(intervals.size());
         for (CaveInterval interval : intervals) {
-            pairs.add(new CoordPair(interval.ceilingAirY(), interval.floorSolidY()));
+            pairs.add(new CaveDecorationCandidate(
+                    new CoordPair(interval.ceilingAirY(), interval.floorSolidY()),
+                    new CaveIntervalMetadata(CaveResolvedType.CHEESE, 1f, SurfaceConnectivity.UNKNOWN)
+            ));
         }
         return pairs;
+    }
+
+    private static @NotNull List<CaveDecorationCandidate> getSnapshotCandidates(@NotNull CaveSnapshotV3 snapshot,
+                                                                                 int localX,
+                                                                                 int localZ)
+    {
+        List<CaveIntervalV3> intervals = snapshot.getColumn(localX, localZ).getIntervals();
+        if (intervals.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<CaveDecorationCandidate> pairs = new ArrayList<>(intervals.size());
+        for (CaveIntervalV3 interval : intervals) {
+            pairs.add(new CaveDecorationCandidate(
+                    new CoordPair(interval.ceilingAirY(), interval.floorSolidY()),
+                    interval.metadata()
+            ));
+        }
+        return pairs;
+    }
+
+    private static int getClusterCandidateIndex(@NotNull List<CaveDecorationCandidate> candidates, @NotNull Random random) {
+        int eligible = 0;
+        for (CaveDecorationCandidate candidate : candidates) {
+            if (isClusterCandidate(candidate)) {
+                eligible++;
+            }
+        }
+        return eligible > 0 ? random.nextInt(eligible) : -1;
+    }
+
+    private static boolean isClusterCandidate(@NotNull CaveDecorationCandidate candidate) {
+        return candidate.metadata().resolvedType() != CaveResolvedType.ENTRANCE;
     }
 
     public static @NotNull Collection<CoordPair> getFilteredPairs(@NotNull Collection<CoordPair> pairs,
@@ -201,5 +284,13 @@ public class MasterCavePopulatorDistributor {
             }
         }
         return filtered;
+    }
+
+    @FunctionalInterface
+    private interface CaveCandidateProvider {
+        @NotNull List<CaveDecorationCandidate> getCandidates(int localX, int localZ);
+    }
+
+    private record CaveDecorationCandidate(@NotNull CoordPair pair, @NotNull CaveIntervalMetadata metadata) {
     }
 }

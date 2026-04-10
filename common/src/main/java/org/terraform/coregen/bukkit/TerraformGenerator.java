@@ -3,7 +3,6 @@ package org.terraform.coregen.bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
-import org.bukkit.block.BlockFace;
 import org.bukkit.generator.BlockPopulator;
 import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.generator.WorldInfo;
@@ -12,8 +11,23 @@ import org.terraform.biome.BiomeBank;
 import org.terraform.biome.BiomeHandler;
 import org.terraform.biome.cavepopulators.MasterCavePopulatorDistributor;
 import org.terraform.cave.v2.CaveInterval;
-import org.terraform.cave.v2.CaveSnapshotBuilder;
-import org.terraform.cave.v2.CaveSnapshotStore;
+import org.terraform.cave.v3.BaseSurfaceMap;
+import org.terraform.cave.v3.BaseSurfaceMapStoreV3;
+import org.terraform.cave.v3.CaveIntervalMetadata;
+import org.terraform.cave.v3.CaveIntervalV3;
+import org.terraform.cave.v3.CaveResolvedType;
+import org.terraform.cave.v3.CaveSnapshotStoreV3;
+import org.terraform.cave.v3.CaveSnapshotV3;
+import org.terraform.cave.v3.CaveSnapshotV3Builder;
+import org.terraform.cave.v3.CompositeVoxelSample;
+import org.terraform.cave.v3.EntranceApprovalResolverV3;
+import org.terraform.cave.v3.EntranceApproval;
+import org.terraform.cave.v3.EntranceApprovalStore;
+import org.terraform.cave.v3.EntranceApprovalTrace;
+import org.terraform.cave.v3.SurfaceConnectivity;
+import org.terraform.cave.v3.generation.CompositeCaveSampler;
+import org.terraform.cave.v3.generation.DensityCompositeCaveSampler;
+import org.terraform.cave.v3.generation.Phase3BSpaghettiFieldProvider;
 import org.terraform.cave.v2.generation.AmbientCaveGeneratorMode;
 import org.terraform.cave.v2.generation.CaveDensitySampler;
 import org.terraform.cave.v2.generation.CaveFieldProvider;
@@ -29,7 +43,6 @@ import org.terraform.data.TerraformWorld;
 import org.terraform.main.TerraformGeneratorPlugin;
 import org.terraform.main.config.TConfig;
 import org.terraform.utils.GenUtils;
-import org.terraform.utils.BlockUtils;
 import org.terraform.utils.blockdata.CommonMat;
 import org.terraform.utils.datastructs.ConcurrentLRUCache;
 
@@ -48,50 +61,18 @@ public class TerraformGenerator extends ChunkGenerator {
     // practice, that doesn't matter
     public static ConcurrentLRUCache<TWCoordPair, ChunkCache> CHUNK_CACHE;
     public static int seaLevel = 62;
-    private static final long DENSITY_V1_ENTRANCE_SEED_SALT = 0x51A1E5EEL;
-    private static final float DENSITY_V1_ENTRANCE_PERTURB_MULTIPLIER = 0.35f;
-    private static final int DENSITY_V1_ENTRANCE_HALF_WIDTH = 1;
-    private static final int DENSITY_V1_ENTRANCE_DEPTH = 2;
-    private static final int DENSITY_V1_ENTRANCE_ROOF_OFFSET = 2;
-    private static final int DENSITY_V1_ENTRANCE_DOMINANT_MARGIN = 1;
-    private static final int DENSITY_V1_ENTRANCE_FACE_DROP = 1;
-    private static final int DENSITY_V1_ENTRANCE_SEA_LEVEL_CLEARANCE = 2;
-    private static final int DENSITY_V1_ENTRANCE_INTERVAL_TOLERANCE = 4;
-    private static final int DENSITY_V1_ENTRANCE_MAX_FLOOR_EXTRA_DEPTH = 6;
-    private static final int DENSITY_V1_ENTRANCE_NEIGHBORHOOD_MIN_MATCHES = 4;
-    private static final float DENSITY_V1_ENTRANCE_MIN_VALID_FOOTPRINT_RATIO = 0.67f;
-    private static final int DENSITY_V1_ENTRANCE_DEBUG_SAMPLE_LIMIT = 3;
-
-    private enum DensityEntranceRejectionReason {
-        WATER_DRY_CONSTRAINT("water/dry constraint failure"),
-        SLOPE_DIRECTION("slope/direction failure"),
-        CAVE_VALIDATION("cave validation failure"),
-        FOOTPRINT_VALIDATION("footprint validation failure");
-
-        private final String label;
-
-        DensityEntranceRejectionReason(String label) {
-            this.label = label;
-        }
-    }
-
-    private record DensityEntranceCandidate(int localX,
-                                            int localZ,
-                                            @NotNull BlockFace direction,
-                                            @NotNull CaveInterval targetInterval) {}
-
-    private record EntranceFootprintColumn(int localX, int localZ, int depthStep, int widthOffset) {}
-
-    private static final class DensityEntranceDebugStats {
+    private static final class DensityEntranceDebugStats implements EntranceApprovalTrace {
         private final TerraformWorld tw;
         private final int chunkX;
         private final int chunkZ;
-        private int candidates;
+        private int rawSeeds;
+        private int localSearchCandidates;
+        private int safeSurfacePasses;
         private int slopePasses;
-        private int cavePasses;
-        private int footprintPasses;
         private int accepted;
-        private int sampledRejections;
+        private int targetPasses;
+        private int approvals;
+        private int entranceCarvedBlocks;
 
         private DensityEntranceDebugStats(@NotNull TerraformWorld tw, int chunkX, int chunkZ) {
             this.tw = tw;
@@ -99,15 +80,36 @@ public class TerraformGenerator extends ChunkGenerator {
             this.chunkZ = chunkZ;
         }
 
-        private void sampleRejection(int rawX, int rawZ, @NotNull DensityEntranceRejectionReason reason) {
-            if (sampledRejections >= DENSITY_V1_ENTRANCE_DEBUG_SAMPLE_LIMIT) {
-                return;
-            }
-            sampledRejections++;
-            TerraformGeneratorPlugin.logger.info(
-                    "[Entrances] reject " + reason.label + " at (" + rawX + "," + rawZ + ") in "
-                    + tw.getName() + " chunk " + chunkX + "," + chunkZ
-            );
+        @Override
+        public void recordRawSeed() {
+            rawSeeds++;
+        }
+
+        @Override
+        public void recordLocalSearchCandidate() {
+            localSearchCandidates++;
+        }
+
+        @Override
+        public void recordSafeSurfacePass() {
+            safeSurfacePasses++;
+        }
+
+        @Override
+        public void recordSlopePass() {
+            slopePasses++;
+        }
+
+        @Override
+        public void recordTargetPass() {
+            targetPasses++;
+        }
+
+        @Override
+        public void recordAccepted(@NotNull EntranceApproval approval) {
+            approvals++;
+            accepted++;
+            logApplied(approval.mouthRawX(), approval.mouthRawZ());
         }
 
         private void logApplied(int rawX, int rawZ) {
@@ -117,10 +119,13 @@ public class TerraformGenerator extends ChunkGenerator {
         private void logSummary() {
             TerraformGeneratorPlugin.logger.info(
                     "[Entrances] " + tw.getName() + " chunk " + chunkX + "," + chunkZ
-                    + " candidates=" + candidates
+                    + " rawSeeds=" + rawSeeds
+                    + " localSearch=" + localSearchCandidates
+                    + " safe=" + safeSurfacePasses
                     + " slope=" + slopePasses
-                    + " cave=" + cavePasses
-                    + " footprint=" + footprintPasses
+                    + " target=" + targetPasses
+                    + " approvals=" + approvals
+                    + " entranceBlocks=" + entranceCarvedBlocks
                     + " accepted=" + accepted
             );
         }
@@ -150,20 +155,50 @@ public class TerraformGenerator extends ChunkGenerator {
 
         // TerraformGeneratorPlugin.watchdogSuppressant.tickWatchdog(); don't unnecessarily tick this shit
 
-        // Ensure that this shit is the same as the one in generateSurface
-        Random random = tw.getHashedRand(chunkX, chunkZ, 31278);
+        AmbientCaveGeneratorMode caveMode = AmbientCaveGeneratorMode.fromConfig(TConfig.c.CAVES_GENERATOR_MODE);
+        if (caveMode == AmbientCaveGeneratorMode.DENSITY_V1) {
+            BaseSurfaceMap baseSurfaceMap = BaseSurfaceMapStoreV3.getBaseSurfaceMap(
+                    tw,
+                    chunkX,
+                    chunkZ,
+                    EntranceApprovalResolverV3.getRequiredPadding()
+            );
+            CaveDensitySampler densitySampler = new Phase3ADensityFieldProvider().createSampler(tw);
+            CaveDensitySampler spaghettiSampler = new Phase3BSpaghettiFieldProvider().createSampler(tw);
+            Collection<EntranceApproval> entranceApprovals = TConfig.c.CAVES_DENSITY_V1_ENTRANCES_ENABLED
+                                                             ? EntranceApprovalStore.getApprovedEntrancesTouchingChunk(tw, chunkX, chunkZ)
+                                                             : Collections.emptyList();
+            CompositeCaveSampler compositeSampler = new DensityCompositeCaveSampler(
+                    densitySampler,
+                    spaghettiSampler,
+                    entranceApprovals
+            );
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    int rawX = chunkX * 16 + x;
+                    int rawZ = chunkZ * 16 + z;
+                    int baseSurfaceY = baseSurfaceMap.getColumn(rawX, rawZ).baseSurfaceY();
+                    cache.writeTransformedHeight(x, z, (short) baseSurfaceY);
+                    for (int y = baseSurfaceY; y >= TerraformGeneratorPlugin.injector.getMinY(); y--) {
+                        if (compositeSampler.canCarve(rawX, y, rawZ, baseSurfaceY)) {
+                            cache.writeTransformedHeight(x, z, (short) (y - 1));
+                        }
+                        else {
+                            break;
+                        }
+                    }
+                }
+            }
+            cache.markTransformedHeightsFilled();
+            return;
+        }
+
+        seedChunkSurfaceHeights(tw, chunkX, chunkZ, cache);
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
                 int rawX = chunkX * 16 + x;
                 int rawZ = chunkZ * 16 + z;
-
-                double preciseHeight = HeightMap.getPreciseHeight(
-                        tw,
-                        rawX,
-                        rawZ
-                ); // bank.getHandler().calculateHeight(tw, rawX, rawZ);
-                cache.writeTransformedHeight(x, z, (short) preciseHeight);
-
+                double preciseHeight = HeightMap.getPreciseHeight(tw, rawX, rawZ);
                 // Carve caves
                 float seaLevelFilter = tw.noiseCaveRegistry.getGenerateCarveSeaFilter(rawX, rawZ, preciseHeight, cache);
                 for (int y = (int) preciseHeight; y >= TerraformGeneratorPlugin.injector.getMinY(); y--)
@@ -180,17 +215,45 @@ public class TerraformGenerator extends ChunkGenerator {
                         break;
                     }
                 }
+            }
+        }
+        applyChunkTerrainTransforms(tw, chunkX, chunkZ, cache, DUD);
+        cache.markTransformedHeightsFilled();
+    }
 
-                // Apply biome transforms to get real height
+    private static void seedChunkSurfaceHeights(@NotNull TerraformWorld tw,
+                                                int chunkX,
+                                                int chunkZ,
+                                                @NotNull ChunkCache cache)
+    {
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int rawX = chunkX * 16 + x;
+                int rawZ = chunkZ * 16 + z;
+                cache.writeTransformedHeight(x, z, (short) HeightMap.getPreciseHeight(tw, rawX, rawZ));
+            }
+        }
+    }
+
+    private static void applyChunkTerrainTransforms(@NotNull TerraformWorld tw,
+                                                    int chunkX,
+                                                    int chunkZ,
+                                                    @NotNull ChunkCache cache,
+                                                    @NotNull ChunkData chunkData)
+    {
+        Random random = tw.getHashedRand(chunkX, chunkZ, 31278);
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int rawX = chunkX * 16 + x;
+                int rawZ = chunkZ * 16 + z;
+                double preciseHeight = HeightMap.getPreciseHeight(tw, rawX, rawZ);
                 BiomeBank bank = tw.getBiomeBank(rawX, (int) preciseHeight, rawZ);
                 BiomeHandler transformHandler = bank.getHandler().getTransformHandler();
-
                 if (transformHandler != null) {
-                    transformHandler.transformTerrain(cache, tw, random, DUD, x, z, chunkX, chunkZ);
+                    transformHandler.transformTerrain(cache, tw, random, chunkData, x, z, chunkX, chunkZ);
                 }
             }
         }
-        cache.markTransformedHeightsFilled();
     }
 
     @Override
@@ -221,9 +284,23 @@ public class TerraformGenerator extends ChunkGenerator {
 
         TerraformWorld tw = TerraformWorld.get(worldInfo.getName(), worldInfo.getSeed());
         ChunkCache cache = getCache(tw, chunkX, chunkZ);
-        CaveSnapshotBuilder caveBuilder = new CaveSnapshotBuilder(chunkX, chunkZ);
+        CaveSnapshotV3Builder caveBuilderV3 = new CaveSnapshotV3Builder(chunkX, chunkZ);
         @SuppressWarnings("unchecked")
         List<CaveInterval>[] caveIntervalsByColumn = new List[256];
+        BaseSurfaceMap baseSurfaceMap = BaseSurfaceMapStoreV3.getBaseSurfaceMap(
+                tw,
+                chunkX,
+                chunkZ,
+                EntranceApprovalResolverV3.getRequiredPadding()
+        );
+        short[] baseSurfaceYByColumn = new short[256];
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int rawX = (chunkX << 4) + x;
+                int rawZ = (chunkZ << 4) + z;
+                baseSurfaceYByColumn[getColumnIndex(x, z)] = baseSurfaceMap.getColumn(rawX, rawZ).baseSurfaceY();
+            }
+        }
 
         // For transformation ONLY
         Random transformRandom = tw.getHashedRand(chunkX, chunkZ, 31278);
@@ -232,6 +309,38 @@ public class TerraformGenerator extends ChunkGenerator {
                                           ? new Phase3ADensityFieldProvider()
                                           : null;
         CaveDensitySampler densitySampler = fieldProvider == null ? null : fieldProvider.createSampler(tw);
+        CaveDensitySampler spaghettiSampler = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
+                                              ? new Phase3BSpaghettiFieldProvider().createSampler(tw)
+                                              : null;
+        DensityEntranceDebugStats entranceDebugStats = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
+                                                       && TConfig.c.CAVES_DENSITY_V1_ENTRANCES_ENABLED
+                                                       && TConfig.c.CAVES_DENSITY_V1_ENTRANCES_DEBUG
+                                                       ? new DensityEntranceDebugStats(tw, chunkX, chunkZ)
+                                                       : null;
+        Collection<EntranceApproval> entranceApprovals = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
+                                                         && TConfig.c.CAVES_DENSITY_V1_ENTRANCES_ENABLED
+                                                         ? entranceDebugStats != null
+                                                           ? EntranceApprovalStore.traceApprovedEntrancesTouchingChunk(
+                                                                   tw,
+                                                                   chunkX,
+                                                                   chunkZ,
+                                                                   entranceDebugStats
+                                                           )
+                                                           : EntranceApprovalStore.getApprovedEntrancesTouchingChunk(
+                                                                   tw,
+                                                                   chunkX,
+                                                                   chunkZ
+                                                           )
+                                                         : Collections.emptyList();
+        CompositeCaveSampler compositeSampler = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
+                                                && densitySampler != null
+                                                && spaghettiSampler != null
+                                                ? new DensityCompositeCaveSampler(
+                                                        densitySampler,
+                                                        spaghettiSampler,
+                                                        entranceApprovals
+                                                )
+                                                : null;
 
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
@@ -278,10 +387,14 @@ public class TerraformGenerator extends ChunkGenerator {
                 }
                 // Water for below certain heights
                 chunkData.setRegion(x, (int) (height + 1),z,x+1,seaLevel+1,z+1, CommonMat.WATER);
+                BiomeHandler transformHandler = bank.getHandler().getTransformHandler();
+                if (caveMode == AmbientCaveGeneratorMode.DENSITY_V1 && transformHandler != null) {
+                    transformHandler.transformTerrain(cache, tw, transformRandom, chunkData, x, z, chunkX, chunkZ);
+                }
 
                 List<CaveInterval> caveIntervals = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
                                                    ? carveDensityFieldColumn(
-                                                           densitySampler,
+                                                           compositeSampler,
                                                            cache,
                                                            chunkData,
                                                            dontCareRandom,
@@ -289,7 +402,8 @@ public class TerraformGenerator extends ChunkGenerator {
                                                            z,
                                                            rawX,
                                                            rawZ,
-                                                           height
+                                                           baseSurfaceYByColumn[getColumnIndex(x, z)],
+                                                           entranceDebugStats
                                                    )
                                                    : carveLegacyAmbientCaves(
                                                            tw,
@@ -304,8 +418,7 @@ public class TerraformGenerator extends ChunkGenerator {
 
                 // Transform height AFTER sea level is written.
                 // Transformed below-sea areas are not supposed to be water.
-                BiomeHandler transformHandler = bank.getHandler().getTransformHandler();
-                if (transformHandler != null) {
+                if (transformHandler != null && caveMode != AmbientCaveGeneratorMode.DENSITY_V1) {
                     transformHandler.transformTerrain(cache, tw, transformRandom, chunkData, x, z, chunkX, chunkZ);
                 }
                 caveIntervalsByColumn[getColumnIndex(x, z)] = caveIntervals;
@@ -320,480 +433,37 @@ public class TerraformGenerator extends ChunkGenerator {
                 }
             }
         }
-        if (caveMode == AmbientCaveGeneratorMode.DENSITY_V1) {
-            applyDensitySurfaceEntrances(tw, cache, chunkData, chunkX, chunkZ, caveIntervalsByColumn);
-        }
         // After this whole song and dance, place bedrock in one operation
         chunkData.setRegion(0,TerraformGeneratorPlugin.injector.getMinY(), 0,
                 16,TerraformGeneratorPlugin.injector.getMinY()+1, 16, CommonMat.BEDROCK);
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
-                caveBuilder.recordColumn(
+                int columnIndex = getColumnIndex(x, z);
+                caveBuilderV3.recordColumn(
                         x,
                         z,
+                        baseSurfaceYByColumn[columnIndex],
                         cache.getTransformedHeight(x, z),
-                        caveIntervalsByColumn[getColumnIndex(x, z)]
+                        toV3Intervals(
+                                caveMode,
+                                compositeSampler,
+                                cache,
+                                x,
+                                z,
+                                (chunkX << 4) + x,
+                                (chunkZ << 4) + z,
+                                baseSurfaceYByColumn[columnIndex],
+                                caveIntervalsByColumn[columnIndex]
+                        )
                 );
             }
         }
         cache.markTransformedHeightsFilled();
-        CaveSnapshotStore.publish(tw, chunkX, chunkZ, caveBuilder.build());
-    }
-
-    private static void applyDensitySurfaceEntrances(@NotNull TerraformWorld tw,
-                                                     @NotNull ChunkCache cache,
-                                                     @NotNull ChunkData chunkData,
-                                                     int chunkX,
-                                                     int chunkZ,
-                                                     @NotNull List<CaveInterval>[] intervalsByColumn)
-    {
-        if (!TConfig.c.CAVES_DENSITY_V1_ENTRANCES_ENABLED) {
-            return;
-        }
-
-        int spacing = Math.max(32, TConfig.c.CAVES_DENSITY_V1_ENTRANCES_SPACING);
-        int validationRadius = Math.max(1, TConfig.c.CAVES_DENSITY_V1_ENTRANCES_VALIDATION_RADIUS);
-        int chunkMargin = validationRadius + DENSITY_V1_ENTRANCE_DEPTH + DENSITY_V1_ENTRANCE_HALF_WIDTH;
-        DensityEntranceDebugStats debugStats = TConfig.c.CAVES_DENSITY_V1_ENTRANCES_DEBUG
-                                               ? new DensityEntranceDebugStats(tw, chunkX, chunkZ)
-                                               : null;
-        CoordPair[] entranceCandidates = GenUtils.vectorRandomObjectPositions(
-                Long.hashCode(tw.getSeed() ^ DENSITY_V1_ENTRANCE_SEED_SALT),
-                chunkX,
-                chunkZ,
-                spacing,
-                DENSITY_V1_ENTRANCE_PERTURB_MULTIPLIER * spacing
-        );
-        boolean[] touched = new boolean[256];
-        ArrayList<Integer> touchedOrder = new ArrayList<>();
-
-        for (CoordPair entranceCandidate : entranceCandidates) {
-            int localX = (int) entranceCandidate.x() - (chunkX << 4);
-            int localZ = (int) entranceCandidate.z() - (chunkZ << 4);
-            if (localX < chunkMargin || localX > 15 - chunkMargin || localZ < chunkMargin || localZ > 15 - chunkMargin) {
-                continue;
-            }
-            if (debugStats != null) {
-                debugStats.candidates++;
-            }
-
-            DensityEntranceCandidate candidate = evaluateDensityEntranceCandidate(
-                    cache,
-                    chunkData,
-                    intervalsByColumn,
-                    touched,
-                    localX,
-                    localZ,
-                    validationRadius,
-                    debugStats,
-                    chunkX,
-                    chunkZ
-            );
-            if (candidate != null) {
-                applyDensityEntranceBreach(cache, chunkData, touched, touchedOrder, candidate);
-                if (debugStats != null) {
-                    debugStats.accepted++;
-                    debugStats.logApplied((chunkX << 4) + candidate.localX(), (chunkZ << 4) + candidate.localZ());
-                }
-            }
-        }
-
-        for (int index : touchedOrder) {
-            intervalsByColumn[index] = rebuildTouchedDensityColumn(cache, chunkData, index & 0xF, index >> 4);
-        }
-        if (debugStats != null) {
-            debugStats.logSummary();
-        }
-    }
-
-    private static DensityEntranceCandidate evaluateDensityEntranceCandidate(@NotNull ChunkCache cache,
-                                                                            @NotNull ChunkData chunkData,
-                                                                            @NotNull List<CaveInterval>[] intervalsByColumn,
-                                                                            boolean @NotNull [] touched,
-                                                                            int localX,
-                                                                            int localZ,
-                                                                            int validationRadius,
-                                                                            DensityEntranceDebugStats debugStats,
-                                                                            int chunkX,
-                                                                            int chunkZ)
-    {
-        int rawX = (chunkX << 4) + localX;
-        int rawZ = (chunkZ << 4) + localZ;
-        if (!isSafeEntranceColumn(cache, chunkData, localX, localZ)) {
-            if (debugStats != null) {
-                debugStats.sampleRejection(rawX, rawZ, DensityEntranceRejectionReason.WATER_DRY_CONSTRAINT);
-            }
-            return null;
-        }
-
-        BlockFace direction = getDominantEntranceDirection(cache, localX, localZ);
-        if (direction == null) {
-            if (debugStats != null) {
-                debugStats.sampleRejection(rawX, rawZ, DensityEntranceRejectionReason.SLOPE_DIRECTION);
-            }
-            return null;
-        }
-        if (debugStats != null) {
-            debugStats.slopePasses++;
-        }
-
-        List<EntranceFootprintColumn> footprint = getEntranceFootprint(localX, localZ, direction);
-        if (!isUntouchedEntranceFootprint(footprint, touched)) {
-            if (debugStats != null) {
-                debugStats.sampleRejection(rawX, rawZ, DensityEntranceRejectionReason.FOOTPRINT_VALIDATION);
-            }
-            return null;
-        }
-
-        CaveInterval targetInterval = findDensityEntranceTarget(cache, intervalsByColumn, footprint);
-        if (targetInterval == null) {
-            if (debugStats != null) {
-                debugStats.sampleRejection(rawX, rawZ, DensityEntranceRejectionReason.CAVE_VALIDATION);
-            }
-            return null;
-        }
-
-        if (!hasEntranceNeighborhoodMatch(intervalsByColumn, localX, localZ, validationRadius, targetInterval)) {
-            if (debugStats != null) {
-                debugStats.sampleRejection(rawX, rawZ, DensityEntranceRejectionReason.CAVE_VALIDATION);
-            }
-            return null;
-        }
-        if (debugStats != null) {
-            debugStats.cavePasses++;
-        }
-
-        if (!isDensityEntranceFootprintValid(cache, chunkData, intervalsByColumn, footprint, direction, targetInterval)) {
-            if (debugStats != null) {
-                debugStats.sampleRejection(rawX, rawZ, DensityEntranceRejectionReason.FOOTPRINT_VALIDATION);
-            }
-            return null;
-        }
-        if (debugStats != null) {
-            debugStats.footprintPasses++;
-        }
-
-        return new DensityEntranceCandidate(localX, localZ, direction, targetInterval);
-    }
-
-    private static void applyDensityEntranceBreach(@NotNull ChunkCache cache,
-                                                   @NotNull ChunkData chunkData,
-                                                   boolean @NotNull [] touched,
-                                                   @NotNull ArrayList<Integer> touchedOrder,
-                                                   @NotNull DensityEntranceCandidate candidate)
-    {
-        int centerSurfaceY = cache.getTransformedHeight(candidate.localX(), candidate.localZ());
-        int minY = TerraformGeneratorPlugin.injector.getMinY();
-        for (EntranceFootprintColumn footprintColumn : getEntranceFootprint(
-                candidate.localX(),
-                candidate.localZ(),
-                candidate.direction()
-        ))
-        {
-            int localX = footprintColumn.localX();
-            int localZ = footprintColumn.localZ();
-            int columnSurfaceY = cache.getTransformedHeight(localX, localZ);
-            int roofY = Math.min(
-                    centerSurfaceY - 1,
-                    columnSurfaceY + DENSITY_V1_ENTRANCE_ROOF_OFFSET - footprintColumn.depthStep()
-            );
-            int floorY = candidate.targetInterval().ceilingAirY()
-                         + (footprintColumn.depthStep() * 2)
-                         + Math.abs(footprintColumn.widthOffset());
-            if (roofY <= minY || floorY > roofY) {
-                continue;
-            }
-
-            markTouchedColumn(localX, localZ, touched, touchedOrder);
-            for (int y = roofY; y >= floorY && y > minY; y--) {
-                chunkData.setBlock(localX, y, localZ, CommonMat.CAVE_AIR);
-                if (y <= columnSurfaceY) {
-                    cache.cacheNonSolid(localX, y, localZ);
-                }
-            }
-        }
-    }
-
-    private static @NotNull List<CaveInterval> rebuildTouchedDensityColumn(@NotNull ChunkCache cache,
-                                                                           @NotNull ChunkData chunkData,
-                                                                           int localX,
-                                                                           int localZ)
-    {
-        int minY = TerraformGeneratorPlugin.injector.getMinY();
-        int invalidHeight = minY - 1;
-        int topSolidY = cache.getTransformedHeight(localX, localZ);
-        while (topSolidY > minY && !chunkData.getType(localX, topSolidY, localZ).isSolid()) {
-            cache.cacheNonSolid(localX, topSolidY, localZ);
-            topSolidY--;
-        }
-
-        if (chunkData.getType(localX, topSolidY, localZ).isSolid()) {
-            cache.cacheSolid(localX, topSolidY, localZ);
-        }
-        else {
-            cache.cacheNonSolid(localX, topSolidY, localZ);
-        }
-        cache.writeTransformedHeight(localX, localZ, (short) topSolidY);
-
-        List<CoordPair> rawPairs = new ArrayList<>();
-        int firstCaveAir = invalidHeight;
-        for (int y = topSolidY - 1; y > minY; y--) {
-            if (chunkData.getType(localX, y, localZ).isSolid()) {
-                cache.cacheSolid(localX, y, localZ);
-                if (firstCaveAir != invalidHeight) {
-                    rawPairs.add(new CoordPair(firstCaveAir, y));
-                    firstCaveAir = invalidHeight;
-                }
-            }
-            else {
-                cache.cacheNonSolid(localX, y, localZ);
-                if (firstCaveAir == invalidHeight) {
-                    firstCaveAir = y;
-                }
-            }
-        }
-
-        if (chunkData.getType(localX, minY, localZ).isSolid()) {
-            cache.cacheSolid(localX, minY, localZ);
-        }
-        else {
-            cache.cacheNonSolid(localX, minY, localZ);
-        }
-        return toCaveIntervals(rawPairs);
-    }
-
-    private static @NotNull List<EntranceFootprintColumn> getEntranceFootprint(int localX,
-                                                                               int localZ,
-                                                                               @NotNull BlockFace direction)
-    {
-        ArrayList<EntranceFootprintColumn> footprint = new ArrayList<>(DENSITY_V1_ENTRANCE_DEPTH * 3);
-        BlockFace side = BlockUtils.getRight(direction);
-        for (int depthStep = 0; depthStep < DENSITY_V1_ENTRANCE_DEPTH; depthStep++) {
-            int baseX = localX + direction.getModX() * depthStep;
-            int baseZ = localZ + direction.getModZ() * depthStep;
-            for (int widthOffset = -DENSITY_V1_ENTRANCE_HALF_WIDTH;
-                 widthOffset <= DENSITY_V1_ENTRANCE_HALF_WIDTH;
-                 widthOffset++)
-            {
-                footprint.add(new EntranceFootprintColumn(
-                        baseX + side.getModX() * widthOffset,
-                        baseZ + side.getModZ() * widthOffset,
-                        depthStep,
-                        widthOffset
-                ));
-            }
-        }
-        return footprint;
-    }
-
-    private static CaveInterval findDensityEntranceTarget(@NotNull ChunkCache cache,
-                                                          @NotNull List<CaveInterval>[] intervalsByColumn,
-                                                          @NotNull List<EntranceFootprintColumn> footprint)
-    {
-        CaveInterval best = null;
-        int bestScore = Integer.MAX_VALUE;
-        int minDepth = Math.max(1, TConfig.c.CAVES_DENSITY_V1_ENTRANCES_MINIMUM_CAVE_DEPTH);
-        int maxDepth = Math.max(minDepth, TConfig.c.CAVES_DENSITY_V1_ENTRANCES_MAXIMUM_CAVE_DEPTH);
-        int maxFloorDepth = maxDepth + DENSITY_V1_ENTRANCE_MAX_FLOOR_EXTRA_DEPTH;
-
-        for (EntranceFootprintColumn footprintColumn : footprint) {
-            int surfaceY = cache.getTransformedHeight(footprintColumn.localX(), footprintColumn.localZ());
-            List<CaveInterval> intervals = intervalsByColumn[getColumnIndex(footprintColumn.localX(), footprintColumn.localZ())];
-            if (intervals == null || intervals.isEmpty()) {
-                continue;
-            }
-
-            for (CaveInterval interval : intervals) {
-                int ceilingDepth = surfaceY - interval.ceilingAirY();
-                int floorDepth = surfaceY - interval.floorSolidY();
-                if (ceilingDepth < minDepth || ceilingDepth > maxDepth || floorDepth > maxFloorDepth) {
-                    continue;
-                }
-
-                int score = ceilingDepth + (footprintColumn.depthStep() * 2) + Math.abs(footprintColumn.widthOffset());
-                if (score < bestScore) {
-                    best = interval;
-                    bestScore = score;
-                }
-            }
-        }
-        return best;
-    }
-
-    private static boolean hasEntranceNeighborhoodMatch(@NotNull List<CaveInterval>[] intervalsByColumn,
-                                                        int localX,
-                                                        int localZ,
-                                                        int validationRadius,
-                                                        @NotNull CaveInterval targetInterval)
-    {
-        int matches = 0;
-        for (int nx = localX - validationRadius; nx <= localX + validationRadius; nx++) {
-            for (int nz = localZ - validationRadius; nz <= localZ + validationRadius; nz++) {
-                if (!isInsideChunk(nx, nz)) {
-                    return false;
-                }
-                if (columnMatchesEntranceTarget(intervalsByColumn[getColumnIndex(nx, nz)], targetInterval)) {
-                    matches++;
-                }
-            }
-        }
-        return matches >= DENSITY_V1_ENTRANCE_NEIGHBORHOOD_MIN_MATCHES;
-    }
-
-    private static boolean isDensityEntranceFootprintValid(@NotNull ChunkCache cache,
-                                                           @NotNull ChunkData chunkData,
-                                                           @NotNull List<CaveInterval>[] intervalsByColumn,
-                                                           @NotNull List<EntranceFootprintColumn> footprint,
-                                                           @NotNull BlockFace direction,
-                                                           @NotNull CaveInterval targetInterval)
-    {
-        int validColumns = 0;
-        for (EntranceFootprintColumn footprintColumn : footprint) {
-            int localX = footprintColumn.localX();
-            int localZ = footprintColumn.localZ();
-            if (!isSafeEntranceColumn(cache, chunkData, localX, localZ)) {
-                continue;
-            }
-            if (!hasEntranceFaceExposure(cache, localX, localZ, direction)) {
-                continue;
-            }
-            if (!columnOrNeighborMatchesTarget(intervalsByColumn, localX, localZ, targetInterval, 1)) {
-                continue;
-            }
-            validColumns++;
-        }
-
-        int requiredValid = Math.max(
-                1,
-                (int) Math.ceil(footprint.size() * DENSITY_V1_ENTRANCE_MIN_VALID_FOOTPRINT_RATIO)
-        );
-        return validColumns >= requiredValid;
-    }
-
-    private static boolean columnOrNeighborMatchesTarget(@NotNull List<CaveInterval>[] intervalsByColumn,
-                                                         int localX,
-                                                         int localZ,
-                                                         @NotNull CaveInterval targetInterval,
-                                                         int radius)
-    {
-        for (int nx = localX - radius; nx <= localX + radius; nx++) {
-            for (int nz = localZ - radius; nz <= localZ + radius; nz++) {
-                if (!isInsideChunk(nx, nz)) {
-                    continue;
-                }
-                if (columnMatchesEntranceTarget(intervalsByColumn[getColumnIndex(nx, nz)], targetInterval)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private static boolean columnMatchesEntranceTarget(List<CaveInterval> intervals, @NotNull CaveInterval targetInterval) {
-        if (intervals == null || intervals.isEmpty()) {
-            return false;
-        }
-
-        for (CaveInterval interval : intervals) {
-            int overlap = Math.min(interval.ceilingAirY(), targetInterval.ceilingAirY())
-                          - Math.max(interval.floorSolidY(), targetInterval.floorSolidY());
-            if (overlap >= 3
-                && Math.abs(interval.ceilingAirY() - targetInterval.ceilingAirY()) <= DENSITY_V1_ENTRANCE_INTERVAL_TOLERANCE)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isSafeEntranceColumn(@NotNull ChunkCache cache,
-                                                @NotNull ChunkData chunkData,
-                                                int localX,
-                                                int localZ)
-    {
-        if (!isInsideChunk(localX, localZ)) {
-            return false;
-        }
-
-        int surfaceY = cache.getTransformedHeight(localX, localZ);
-        if (surfaceY <= seaLevel + DENSITY_V1_ENTRANCE_SEA_LEVEL_CLEARANCE) {
-            return false;
-        }
-        if (!chunkData.getType(localX, surfaceY, localZ).isSolid()) {
-            return false;
-        }
-
-        Material aboveSurface = chunkData.getType(
-                localX,
-                Math.min(surfaceY + 1, TerraformGeneratorPlugin.injector.getMaxY() - 1),
-                localZ
-        );
-        return !BlockUtils.wetMaterials.contains(aboveSurface);
-    }
-
-    private static boolean hasEntranceFaceExposure(@NotNull ChunkCache cache, int localX, int localZ, @NotNull BlockFace direction) {
-        int forwardX = localX + direction.getModX();
-        int forwardZ = localZ + direction.getModZ();
-        if (!isInsideChunk(forwardX, forwardZ)) {
-            return false;
-        }
-
-        int surfaceY = cache.getTransformedHeight(localX, localZ);
-        int forwardSurfaceY = cache.getTransformedHeight(forwardX, forwardZ);
-        return surfaceY - forwardSurfaceY >= DENSITY_V1_ENTRANCE_FACE_DROP;
-    }
-
-    private static BlockFace getDominantEntranceDirection(@NotNull ChunkCache cache, int localX, int localZ) {
-        int centerSurfaceY = cache.getTransformedHeight(localX, localZ);
-        BlockFace bestDirection = null;
-        int bestDrop = Integer.MIN_VALUE;
-        int secondBestDrop = Integer.MIN_VALUE;
-
-        for (BlockFace face : BlockUtils.directBlockFaces) {
-            int neighborSurfaceY = cache.getTransformedHeight(localX + face.getModX(), localZ + face.getModZ());
-            int drop = centerSurfaceY - neighborSurfaceY;
-            if (drop > bestDrop) {
-                secondBestDrop = bestDrop;
-                bestDrop = drop;
-                bestDirection = face;
-            }
-            else if (drop > secondBestDrop) {
-                secondBestDrop = drop;
-            }
-        }
-
-        if (bestDirection == null || bestDrop < TConfig.c.CAVES_DENSITY_V1_ENTRANCES_MINIMUM_SLOPE_DROP) {
-            return null;
-        }
-        if (secondBestDrop != Integer.MIN_VALUE && bestDrop < secondBestDrop + DENSITY_V1_ENTRANCE_DOMINANT_MARGIN) {
-            return null;
-        }
-        return bestDirection;
-    }
-
-    private static boolean isUntouchedEntranceFootprint(@NotNull List<EntranceFootprintColumn> footprint,
-                                                        boolean @NotNull [] touched)
-    {
-        for (EntranceFootprintColumn footprintColumn : footprint) {
-            if (!isInsideChunk(footprintColumn.localX(), footprintColumn.localZ())) {
-                return false;
-            }
-            if (touched[getColumnIndex(footprintColumn.localX(), footprintColumn.localZ())]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static void markTouchedColumn(int localX,
-                                          int localZ,
-                                          boolean @NotNull [] touched,
-                                          @NotNull ArrayList<Integer> touchedOrder)
-    {
-        int index = getColumnIndex(localX, localZ);
-        if (!touched[index]) {
-            touched[index] = true;
-            touchedOrder.add(index);
+        CaveSnapshotV3 snapshotV3 = caveBuilderV3.build();
+        CaveSnapshotStoreV3.publishGameplay(tw, chunkX, chunkZ, snapshotV3);
+        CaveSnapshotStoreV3.publishTooling(tw, chunkX, chunkZ, snapshotV3);
+        if (entranceDebugStats != null) {
+            entranceDebugStats.logSummary();
         }
     }
 
@@ -850,7 +520,7 @@ public class TerraformGenerator extends ChunkGenerator {
         return toCaveIntervals(rawPairs);
     }
 
-    private static @NotNull List<CaveInterval> carveDensityFieldColumn(@NotNull CaveDensitySampler densitySampler,
+    private static @NotNull List<CaveInterval> carveDensityFieldColumn(@NotNull CompositeCaveSampler compositeSampler,
                                                                        @NotNull ChunkCache cache,
                                                                        @NotNull ChunkData chunkData,
                                                                        @NotNull Random dontCareRandom,
@@ -858,7 +528,8 @@ public class TerraformGenerator extends ChunkGenerator {
                                                                        int localZ,
                                                                        int rawX,
                                                                        int rawZ,
-                                                                       double surfaceHeight)
+                                                                       double surfaceHeight,
+                                                                       DensityEntranceDebugStats debugStats)
     {
         final int minY = TerraformGeneratorPlugin.injector.getMinY();
         final int invalHeight = minY - 1;
@@ -877,15 +548,22 @@ public class TerraformGenerator extends ChunkGenerator {
             }
 
             boolean isCarved = false;
-            if (TConfig.areCavesEnabled() && canDensityCarveAtY(y, surfaceHeight)) {
-                float threshold = TConfig.c.CAVES_DENSITY_V1_THRESHOLD
-                                  + getDensitySurfacePenalty(y, surfaceHeight)
-                                  + getDensitySeaLevelPenalty(y, surfaceHeight);
-                isCarved = densitySampler.sampleDensity(rawX, y, rawZ, surfaceHeight) >= threshold;
+            CompositeVoxelSample debugSample = null;
+            if (TConfig.areCavesEnabled()) {
+                if (debugStats != null) {
+                    debugSample = compositeSampler.sampleDebug(rawX, y, rawZ, surfaceHeight);
+                    isCarved = debugSample.finalScore() >= 0f;
+                }
+                else {
+                    isCarved = compositeSampler.canCarve(rawX, y, rawZ, surfaceHeight);
+                }
             }
             if (isCarved) {
                 chunkData.setBlock(localX, y, localZ, CommonMat.CAVE_AIR);
                 cache.cacheNonSolid(localX, y, localZ);
+                if (debugSample != null && debugSample.resolvedType() == CaveResolvedType.ENTRANCE && debugStats != null) {
+                    debugStats.entranceCarvedBlocks++;
+                }
                 if (y > minY && mustUpdateHeight) {
                     cache.writeTransformedHeight(localX, localZ, (short) (y - 1));
                 }
@@ -913,48 +591,108 @@ public class TerraformGenerator extends ChunkGenerator {
         return toCaveIntervals(rawPairs);
     }
 
-    private static boolean canDensityCarveAtY(int y, double surfaceHeight) {
-        return y <= surfaceHeight - TConfig.c.CAVES_DENSITY_V1_SURFACE_NO_CARVE_CLEARANCE;
+    private static @NotNull List<CaveIntervalV3> toV3Intervals(@NotNull AmbientCaveGeneratorMode caveMode,
+                                                                CompositeCaveSampler compositeSampler,
+                                                                @NotNull ChunkCache cache,
+                                                                int localX,
+                                                                int localZ,
+                                                                int rawX,
+                                                                int rawZ,
+                                                                double baseSurfaceHeight,
+                                                                List<CaveInterval> intervals)
+    {
+        if (intervals == null || intervals.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<CaveIntervalV3> result = new ArrayList<>(intervals.size());
+        for (CaveInterval interval : intervals) {
+            result.add(new CaveIntervalV3(
+                    interval.ceilingAirY(),
+                    interval.floorSolidY(),
+                    buildIntervalMetadata(
+                            caveMode,
+                            compositeSampler,
+                            cache,
+                            localX,
+                            localZ,
+                            rawX,
+                            rawZ,
+                            baseSurfaceHeight,
+                            interval
+                    )
+            ));
+        }
+        return result;
     }
 
-    private static float getDensitySurfacePenalty(int y, double surfaceHeight) {
-        int hardClearance = TConfig.c.CAVES_DENSITY_V1_SURFACE_NO_CARVE_CLEARANCE;
-        int fullClearance = Math.max(hardClearance, TConfig.c.CAVES_DENSITY_V1_SURFACE_FULL_CARVE_CLEARANCE);
-        if (fullClearance <= hardClearance) {
-            return 0f;
+    private static @NotNull CaveIntervalMetadata buildIntervalMetadata(@NotNull AmbientCaveGeneratorMode caveMode,
+                                                                       CompositeCaveSampler compositeSampler,
+                                                                       @NotNull ChunkCache cache,
+                                                                       int localX,
+                                                                       int localZ,
+                                                                       int rawX,
+                                                                       int rawZ,
+                                                                       double baseSurfaceHeight,
+                                                                       @NotNull CaveInterval interval)
+    {
+        int topSolidY = cache.getTransformedHeight(localX, localZ);
+        SurfaceConnectivity connectivity = interval.ceilingAirY() > topSolidY ? SurfaceConnectivity.YES : SurfaceConnectivity.NO;
+        if (caveMode != AmbientCaveGeneratorMode.DENSITY_V1 || compositeSampler == null) {
+            return new CaveIntervalMetadata(CaveResolvedType.CHEESE, 1f, connectivity);
         }
 
-        double hardCeiling = surfaceHeight - hardClearance;
-        double fullCarveY = surfaceHeight - fullClearance;
-        if (y <= fullCarveY) {
-            return 0f;
+        int entranceVotes = 0;
+        int spaghettiVotes = 0;
+        int cheeseVotes = 0;
+        float entranceScoreSum = 0f;
+        float spaghettiScoreSum = 0f;
+        float cheeseScoreSum = 0f;
+        float totalConfidence = 0f;
+        int samples = 0;
+
+        for (int y = interval.floorSolidY() + 1; y <= interval.ceilingAirY(); y++) {
+            CompositeVoxelSample voxelSample = compositeSampler.sampleDebug(rawX, y, rawZ, baseSurfaceHeight);
+            float finalScore = voxelSample.finalScore();
+            totalConfidence += voxelSample.confidence();
+            samples++;
+            switch (voxelSample.resolvedType()) {
+                case ENTRANCE -> {
+                    entranceVotes++;
+                    entranceScoreSum += finalScore;
+                }
+                case SPAGHETTI -> {
+                    spaghettiVotes++;
+                    spaghettiScoreSum += finalScore;
+                }
+                case CHEESE -> {
+                    cheeseVotes++;
+                    cheeseScoreSum += finalScore;
+                }
+            }
         }
 
-        float ratio = (float) ((y - fullCarveY) / (hardCeiling - fullCarveY));
-        return TConfig.c.CAVES_DENSITY_V1_SURFACE_MAX_THRESHOLD_PENALTY * clamp01(ratio);
-    }
-
-    private static float getDensitySeaLevelPenalty(int y, double surfaceHeight) {
-        if (surfaceHeight > seaLevel + TConfig.c.CAVES_DENSITY_V1_SEA_LEVEL_COLUMN_BUFFER) {
-            return 0f;
+        CaveResolvedType resolvedType;
+        if (entranceVotes > cheeseVotes && entranceVotes > spaghettiVotes) {
+            resolvedType = CaveResolvedType.ENTRANCE;
         }
-
-        int fadeDepth = TConfig.c.CAVES_DENSITY_V1_SEA_LEVEL_FADE_DEPTH;
-        if (fadeDepth <= 0) {
-            return 0f;
+        else if (cheeseVotes > entranceVotes && cheeseVotes > spaghettiVotes) {
+            resolvedType = CaveResolvedType.CHEESE;
         }
-
-        int lowerBound = seaLevel - fadeDepth;
-        if (y <= lowerBound) {
-            return 0f;
+        else if (spaghettiVotes > entranceVotes && spaghettiVotes > cheeseVotes) {
+            resolvedType = CaveResolvedType.SPAGHETTI;
         }
-
-        float ratio = (float) (y - lowerBound) / fadeDepth;
-        return TConfig.c.CAVES_DENSITY_V1_SEA_LEVEL_MAX_THRESHOLD_PENALTY * clamp01(ratio);
-    }
-
-    private static float clamp01(float value) {
-        return Math.max(0f, Math.min(1f, value));
+        else if (entranceScoreSum >= cheeseScoreSum && entranceScoreSum >= spaghettiScoreSum) {
+            resolvedType = CaveResolvedType.ENTRANCE;
+        }
+        else if (cheeseScoreSum >= spaghettiScoreSum) {
+            resolvedType = CaveResolvedType.CHEESE;
+        }
+        else {
+            resolvedType = CaveResolvedType.SPAGHETTI;
+        }
+        float confidence = samples == 0 ? 0f : totalConfidence / samples;
+        return new CaveIntervalMetadata(resolvedType, confidence, connectivity);
     }
 
     private static @NotNull List<CaveInterval> toCaveIntervals(@NotNull Collection<CoordPair> rawPairs) {
