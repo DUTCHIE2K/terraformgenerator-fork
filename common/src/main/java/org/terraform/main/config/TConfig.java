@@ -389,7 +389,7 @@ public class TConfig extends YamlFileInterface {
     @YamlKey("caves.allow-flooded-caves")
     public boolean CAVES_ALLOW_FLOODED_CAVES = false;
     @YamlKey("caves.generator-mode")
-    public String CAVES_GENERATOR_MODE = "LEGACY";
+    public String CAVES_GENERATOR_MODE = "COMPOSITE_V3";
     @YamlKey("caves.density-v1.frequency")
     public float CAVES_DENSITY_V1_FREQUENCY = 0.035f;
     @YamlKey("caves.density-v1.threshold")

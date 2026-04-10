@@ -1,8 +1,6 @@
 package org.terraform.cave.v3.generation;
 
 import org.jetbrains.annotations.NotNull;
-import org.terraform.cave.v2.generation.CaveDensitySampler;
-import org.terraform.cave.v2.generation.CaveFieldProvider;
 import org.terraform.coregen.bukkit.TerraformGenerator;
 import org.terraform.data.TerraformWorld;
 import org.terraform.main.config.TConfig;
@@ -15,7 +13,7 @@ public final class Phase3BSpaghettiFieldProvider implements CaveFieldProvider {
     private static final float VERTICAL_SCALE = 0.4f;
 
     @Override
-    public @NotNull CaveDensitySampler createSampler(@NotNull TerraformWorld tw) {
+    public @NotNull CaveFieldSampler createSampler(@NotNull TerraformWorld tw) {
         FastNoise noise = NoiseCacheHandler.getNoise(
                 tw,
                 NoiseCacheHandler.NoiseCacheEntry.CAVE_V3_SPAGHETTI_NOISE,

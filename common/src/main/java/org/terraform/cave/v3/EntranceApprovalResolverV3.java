@@ -3,9 +3,9 @@ package org.terraform.cave.v3;
 import org.bukkit.block.BlockFace;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.terraform.cave.v2.generation.CaveDensitySampler;
-import org.terraform.cave.v2.generation.Phase3ADensityFieldProvider;
+import org.terraform.cave.v3.generation.CaveFieldSampler;
 import org.terraform.cave.v3.generation.DensityCarveRules;
+import org.terraform.cave.v3.generation.Phase3ACheeseFieldProvider;
 import org.terraform.data.CoordPair;
 import org.terraform.data.TerraformWorld;
 import org.terraform.main.config.TConfig;
@@ -124,7 +124,7 @@ public final class EntranceApprovalResolverV3 {
                 ownerChunkZ(anchor),
                 REQUIRED_PADDING
         );
-        CaveDensitySampler densitySampler = new Phase3ADensityFieldProvider().createSampler(tw);
+        CaveFieldSampler densitySampler = new Phase3ACheeseFieldProvider().createSampler(tw);
         return evaluateDensityEntranceApproval(densitySampler, baseSurfaceMap, anchor, trace);
     }
 
@@ -140,7 +140,7 @@ public final class EntranceApprovalResolverV3 {
         return maxX >= chunkMinX && minX <= chunkMaxX && maxZ >= chunkMinZ && minZ <= chunkMaxZ;
     }
 
-    private static @Nullable EntranceApproval evaluateDensityEntranceApproval(@NotNull CaveDensitySampler densitySampler,
+    private static @Nullable EntranceApproval evaluateDensityEntranceApproval(@NotNull CaveFieldSampler densitySampler,
                                                                               @NotNull BaseSurfaceMap baseSurfaceMap,
                                                                               @NotNull EntranceAnchor anchor,
                                                                               @Nullable EntranceApprovalTrace trace)
@@ -219,7 +219,7 @@ public final class EntranceApprovalResolverV3 {
         return bestApproval;
     }
 
-    private static @Nullable DensityEntranceTarget findDensityEntranceApprovalTarget(@NotNull CaveDensitySampler densitySampler,
+    private static @Nullable DensityEntranceTarget findDensityEntranceApprovalTarget(@NotNull CaveFieldSampler densitySampler,
                                                                                      @NotNull BaseSurfaceMap baseSurfaceMap,
                                                                                      int mouthX,
                                                                                      int mouthSurfaceY,

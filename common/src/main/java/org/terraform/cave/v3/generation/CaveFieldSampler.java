@@ -1,6 +1,6 @@
-package org.terraform.cave.v2.generation;
+package org.terraform.cave.v3.generation;
 
 @FunctionalInterface
-public interface CaveDensitySampler {
+public interface CaveFieldSampler {
     float sampleDensity(int rawX, int y, int rawZ, double surfaceHeight);
 }

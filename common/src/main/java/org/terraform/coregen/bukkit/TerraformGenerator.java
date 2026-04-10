@@ -10,7 +10,6 @@ import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
 import org.terraform.biome.BiomeHandler;
 import org.terraform.biome.cavepopulators.MasterCavePopulatorDistributor;
-import org.terraform.cave.v2.CaveInterval;
 import org.terraform.cave.v3.BaseSurfaceMap;
 import org.terraform.cave.v3.BaseSurfaceMapStoreV3;
 import org.terraform.cave.v3.CaveIntervalMetadata;
@@ -25,13 +24,13 @@ import org.terraform.cave.v3.EntranceApproval;
 import org.terraform.cave.v3.EntranceApprovalStore;
 import org.terraform.cave.v3.EntranceApprovalTrace;
 import org.terraform.cave.v3.SurfaceConnectivity;
+import org.terraform.cave.v3.generation.CaveFieldProvider;
+import org.terraform.cave.v3.generation.CaveFieldSampler;
 import org.terraform.cave.v3.generation.CompositeCaveSampler;
+import org.terraform.cave.v3.generation.CompositeCaveGeneratorMode;
 import org.terraform.cave.v3.generation.DensityCompositeCaveSampler;
+import org.terraform.cave.v3.generation.Phase3ACheeseFieldProvider;
 import org.terraform.cave.v3.generation.Phase3BSpaghettiFieldProvider;
-import org.terraform.cave.v2.generation.AmbientCaveGeneratorMode;
-import org.terraform.cave.v2.generation.CaveDensitySampler;
-import org.terraform.cave.v2.generation.CaveFieldProvider;
-import org.terraform.cave.v2.generation.Phase3ADensityFieldProvider;
 import org.terraform.coregen.ChunkCache;
 import org.terraform.coregen.HeightMap;
 import org.terraform.coregen.TerraformPopulator;
@@ -61,6 +60,8 @@ public class TerraformGenerator extends ChunkGenerator {
     // practice, that doesn't matter
     public static ConcurrentLRUCache<TWCoordPair, ChunkCache> CHUNK_CACHE;
     public static int seaLevel = 62;
+    private record CarvedInterval(short ceilingAirY, short floorSolidY) {}
+
     private static final class DensityEntranceDebugStats implements EntranceApprovalTrace {
         private final TerraformWorld tw;
         private final int chunkX;
@@ -155,16 +156,16 @@ public class TerraformGenerator extends ChunkGenerator {
 
         // TerraformGeneratorPlugin.watchdogSuppressant.tickWatchdog(); don't unnecessarily tick this shit
 
-        AmbientCaveGeneratorMode caveMode = AmbientCaveGeneratorMode.fromConfig(TConfig.c.CAVES_GENERATOR_MODE);
-        if (caveMode == AmbientCaveGeneratorMode.DENSITY_V1) {
+        CompositeCaveGeneratorMode caveMode = CompositeCaveGeneratorMode.fromConfig(TConfig.c.CAVES_GENERATOR_MODE);
+        if (caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3) {
             BaseSurfaceMap baseSurfaceMap = BaseSurfaceMapStoreV3.getBaseSurfaceMap(
                     tw,
                     chunkX,
                     chunkZ,
                     EntranceApprovalResolverV3.getRequiredPadding()
             );
-            CaveDensitySampler densitySampler = new Phase3ADensityFieldProvider().createSampler(tw);
-            CaveDensitySampler spaghettiSampler = new Phase3BSpaghettiFieldProvider().createSampler(tw);
+            CaveFieldSampler densitySampler = new Phase3ACheeseFieldProvider().createSampler(tw);
+            CaveFieldSampler spaghettiSampler = new Phase3BSpaghettiFieldProvider().createSampler(tw);
             Collection<EntranceApproval> entranceApprovals = TConfig.c.CAVES_DENSITY_V1_ENTRANCES_ENABLED
                                                              ? EntranceApprovalStore.getApprovedEntrancesTouchingChunk(tw, chunkX, chunkZ)
                                                              : Collections.emptyList();
@@ -286,7 +287,7 @@ public class TerraformGenerator extends ChunkGenerator {
         ChunkCache cache = getCache(tw, chunkX, chunkZ);
         CaveSnapshotV3Builder caveBuilderV3 = new CaveSnapshotV3Builder(chunkX, chunkZ);
         @SuppressWarnings("unchecked")
-        List<CaveInterval>[] caveIntervalsByColumn = new List[256];
+        List<CarvedInterval>[] caveIntervalsByColumn = new List[256];
         BaseSurfaceMap baseSurfaceMap = BaseSurfaceMapStoreV3.getBaseSurfaceMap(
                 tw,
                 chunkX,
@@ -304,20 +305,20 @@ public class TerraformGenerator extends ChunkGenerator {
 
         // For transformation ONLY
         Random transformRandom = tw.getHashedRand(chunkX, chunkZ, 31278);
-        AmbientCaveGeneratorMode caveMode = AmbientCaveGeneratorMode.fromConfig(TConfig.c.CAVES_GENERATOR_MODE);
-        CaveFieldProvider fieldProvider = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
-                                          ? new Phase3ADensityFieldProvider()
+        CompositeCaveGeneratorMode caveMode = CompositeCaveGeneratorMode.fromConfig(TConfig.c.CAVES_GENERATOR_MODE);
+        CaveFieldProvider fieldProvider = caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3
+                                          ? new Phase3ACheeseFieldProvider()
                                           : null;
-        CaveDensitySampler densitySampler = fieldProvider == null ? null : fieldProvider.createSampler(tw);
-        CaveDensitySampler spaghettiSampler = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
+        CaveFieldSampler densitySampler = fieldProvider == null ? null : fieldProvider.createSampler(tw);
+        CaveFieldSampler spaghettiSampler = caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3
                                               ? new Phase3BSpaghettiFieldProvider().createSampler(tw)
                                               : null;
-        DensityEntranceDebugStats entranceDebugStats = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
+        DensityEntranceDebugStats entranceDebugStats = caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3
                                                        && TConfig.c.CAVES_DENSITY_V1_ENTRANCES_ENABLED
                                                        && TConfig.c.CAVES_DENSITY_V1_ENTRANCES_DEBUG
                                                        ? new DensityEntranceDebugStats(tw, chunkX, chunkZ)
                                                        : null;
-        Collection<EntranceApproval> entranceApprovals = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
+        Collection<EntranceApproval> entranceApprovals = caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3
                                                          && TConfig.c.CAVES_DENSITY_V1_ENTRANCES_ENABLED
                                                          ? entranceDebugStats != null
                                                            ? EntranceApprovalStore.traceApprovedEntrancesTouchingChunk(
@@ -332,7 +333,7 @@ public class TerraformGenerator extends ChunkGenerator {
                                                                    chunkZ
                                                            )
                                                          : Collections.emptyList();
-        CompositeCaveSampler compositeSampler = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
+        CompositeCaveSampler compositeSampler = caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3
                                                 && densitySampler != null
                                                 && spaghettiSampler != null
                                                 ? new DensityCompositeCaveSampler(
@@ -359,7 +360,7 @@ public class TerraformGenerator extends ChunkGenerator {
                 chunkData.setRegion(x,TerraformGeneratorPlugin.injector.getMinY(),z,
                         x+1, 0,z+1, CommonMat.DEEPSLATE);
 
-                if (caveMode == AmbientCaveGeneratorMode.LEGACY) {
+                if (caveMode == CompositeCaveGeneratorMode.LEGACY) {
                     //Iterate the remaining area to carve out caves
                     for (int y = (int) height; y >= TerraformGeneratorPlugin.injector.getMinY(); y--) {
                        if (y >= 0 && y <= 2) {
@@ -388,11 +389,11 @@ public class TerraformGenerator extends ChunkGenerator {
                 // Water for below certain heights
                 chunkData.setRegion(x, (int) (height + 1),z,x+1,seaLevel+1,z+1, CommonMat.WATER);
                 BiomeHandler transformHandler = bank.getHandler().getTransformHandler();
-                if (caveMode == AmbientCaveGeneratorMode.DENSITY_V1 && transformHandler != null) {
+                if (caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3 && transformHandler != null) {
                     transformHandler.transformTerrain(cache, tw, transformRandom, chunkData, x, z, chunkX, chunkZ);
                 }
 
-                List<CaveInterval> caveIntervals = caveMode == AmbientCaveGeneratorMode.DENSITY_V1
+                List<CarvedInterval> caveIntervals = caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3
                                                    ? carveDensityFieldColumn(
                                                            compositeSampler,
                                                            cache,
@@ -418,7 +419,7 @@ public class TerraformGenerator extends ChunkGenerator {
 
                 // Transform height AFTER sea level is written.
                 // Transformed below-sea areas are not supposed to be water.
-                if (transformHandler != null && caveMode != AmbientCaveGeneratorMode.DENSITY_V1) {
+                if (transformHandler != null && caveMode != CompositeCaveGeneratorMode.COMPOSITE_V3) {
                     transformHandler.transformTerrain(cache, tw, transformRandom, chunkData, x, z, chunkX, chunkZ);
                 }
                 caveIntervalsByColumn[getColumnIndex(x, z)] = caveIntervals;
@@ -475,14 +476,14 @@ public class TerraformGenerator extends ChunkGenerator {
         return localX + (localZ << 4);
     }
 
-    private static @NotNull List<CaveInterval> carveLegacyAmbientCaves(@NotNull TerraformWorld tw,
-                                                                       @NotNull ChunkCache cache,
-                                                                       @NotNull ChunkData chunkData,
-                                                                       int localX,
-                                                                       int localZ,
-                                                                       int rawX,
-                                                                       int rawZ,
-                                                                       double height)
+    private static @NotNull List<CarvedInterval> carveLegacyAmbientCaves(@NotNull TerraformWorld tw,
+                                                                         @NotNull ChunkCache cache,
+                                                                         @NotNull ChunkData chunkData,
+                                                                         int localX,
+                                                                         int localZ,
+                                                                         int rawX,
+                                                                         int rawZ,
+                                                                         double height)
     {
         final int invalHeight = TerraformGeneratorPlugin.injector.getMinY() - 1;
         int firstCaveAir = invalHeight;
@@ -520,16 +521,16 @@ public class TerraformGenerator extends ChunkGenerator {
         return toCaveIntervals(rawPairs);
     }
 
-    private static @NotNull List<CaveInterval> carveDensityFieldColumn(@NotNull CompositeCaveSampler compositeSampler,
-                                                                       @NotNull ChunkCache cache,
-                                                                       @NotNull ChunkData chunkData,
-                                                                       @NotNull Random dontCareRandom,
-                                                                       int localX,
-                                                                       int localZ,
-                                                                       int rawX,
-                                                                       int rawZ,
-                                                                       double surfaceHeight,
-                                                                       DensityEntranceDebugStats debugStats)
+    private static @NotNull List<CarvedInterval> carveDensityFieldColumn(@NotNull CompositeCaveSampler compositeSampler,
+                                                                         @NotNull ChunkCache cache,
+                                                                         @NotNull ChunkData chunkData,
+                                                                         @NotNull Random dontCareRandom,
+                                                                         int localX,
+                                                                         int localZ,
+                                                                         int rawX,
+                                                                         int rawZ,
+                                                                         double surfaceHeight,
+                                                                         DensityEntranceDebugStats debugStats)
     {
         final int minY = TerraformGeneratorPlugin.injector.getMinY();
         final int invalHeight = minY - 1;
@@ -591,7 +592,7 @@ public class TerraformGenerator extends ChunkGenerator {
         return toCaveIntervals(rawPairs);
     }
 
-    private static @NotNull List<CaveIntervalV3> toV3Intervals(@NotNull AmbientCaveGeneratorMode caveMode,
+    private static @NotNull List<CaveIntervalV3> toV3Intervals(@NotNull CompositeCaveGeneratorMode caveMode,
                                                                 CompositeCaveSampler compositeSampler,
                                                                 @NotNull ChunkCache cache,
                                                                 int localX,
@@ -599,14 +600,14 @@ public class TerraformGenerator extends ChunkGenerator {
                                                                 int rawX,
                                                                 int rawZ,
                                                                 double baseSurfaceHeight,
-                                                                List<CaveInterval> intervals)
+                                                                List<CarvedInterval> intervals)
     {
         if (intervals == null || intervals.isEmpty()) {
             return Collections.emptyList();
         }
 
         List<CaveIntervalV3> result = new ArrayList<>(intervals.size());
-        for (CaveInterval interval : intervals) {
+        for (CarvedInterval interval : intervals) {
             result.add(new CaveIntervalV3(
                     interval.ceilingAirY(),
                     interval.floorSolidY(),
@@ -626,7 +627,7 @@ public class TerraformGenerator extends ChunkGenerator {
         return result;
     }
 
-    private static @NotNull CaveIntervalMetadata buildIntervalMetadata(@NotNull AmbientCaveGeneratorMode caveMode,
+    private static @NotNull CaveIntervalMetadata buildIntervalMetadata(@NotNull CompositeCaveGeneratorMode caveMode,
                                                                        CompositeCaveSampler compositeSampler,
                                                                        @NotNull ChunkCache cache,
                                                                        int localX,
@@ -634,11 +635,11 @@ public class TerraformGenerator extends ChunkGenerator {
                                                                        int rawX,
                                                                        int rawZ,
                                                                        double baseSurfaceHeight,
-                                                                       @NotNull CaveInterval interval)
+                                                                       @NotNull CarvedInterval interval)
     {
         int topSolidY = cache.getTransformedHeight(localX, localZ);
         SurfaceConnectivity connectivity = interval.ceilingAirY() > topSolidY ? SurfaceConnectivity.YES : SurfaceConnectivity.NO;
-        if (caveMode != AmbientCaveGeneratorMode.DENSITY_V1 || compositeSampler == null) {
+        if (caveMode != CompositeCaveGeneratorMode.COMPOSITE_V3 || compositeSampler == null) {
             return new CaveIntervalMetadata(CaveResolvedType.CHEESE, 1f, connectivity);
         }
 
@@ -695,7 +696,7 @@ public class TerraformGenerator extends ChunkGenerator {
         return new CaveIntervalMetadata(resolvedType, confidence, connectivity);
     }
 
-    private static @NotNull List<CaveInterval> toCaveIntervals(@NotNull Collection<CoordPair> rawPairs) {
+    private static @NotNull List<CarvedInterval> toCaveIntervals(@NotNull Collection<CoordPair> rawPairs) {
         Collection<CoordPair> filteredCaveCeilFloors = MasterCavePopulatorDistributor.getFilteredPairs(
                 rawPairs,
                 MasterCavePopulatorDistributor.AMBIENT_MINIMUM_CAVE_HEIGHT
@@ -704,9 +705,9 @@ public class TerraformGenerator extends ChunkGenerator {
             return Collections.emptyList();
         }
 
-        List<CaveInterval> caveIntervals = new ArrayList<>(filteredCaveCeilFloors.size());
+        List<CarvedInterval> caveIntervals = new ArrayList<>(filteredCaveCeilFloors.size());
         for (CoordPair pair : filteredCaveCeilFloors) {
-            caveIntervals.add(new CaveInterval((short) pair.x(), (short) pair.z()));
+            caveIntervals.add(new CarvedInterval((short) pair.x(), (short) pair.z()));
         }
         return caveIntervals;
     }

@@ -1,7 +1,6 @@
 package org.terraform.cave.v3.generation;
 
 import org.jetbrains.annotations.NotNull;
-import org.terraform.cave.v2.generation.CaveDensitySampler;
 import org.terraform.cave.v3.CaveIntentType;
 import org.terraform.cave.v3.CaveResolvedType;
 import org.terraform.cave.v3.CompositeVoxelSample;
@@ -14,12 +13,12 @@ public final class DensityCompositeCaveSampler implements CompositeCaveSampler {
     private static final float ENTRANCE_MIN_SURFACE_INFLUENCE = 0.05f;
     private static final float ENTRANCE_FORCE_CARVE_INFLUENCE = 0.24f;
 
-    private final @NotNull CaveDensitySampler cheeseDensitySampler;
-    private final @NotNull CaveDensitySampler spaghettiDensitySampler;
+    private final @NotNull CaveFieldSampler cheeseDensitySampler;
+    private final @NotNull CaveFieldSampler spaghettiDensitySampler;
     private final @NotNull EntranceApproval[] entrances;
 
-    public DensityCompositeCaveSampler(@NotNull CaveDensitySampler cheeseDensitySampler,
-                                       @NotNull CaveDensitySampler spaghettiDensitySampler,
+    public DensityCompositeCaveSampler(@NotNull CaveFieldSampler cheeseDensitySampler,
+                                       @NotNull CaveFieldSampler spaghettiDensitySampler,
                                        @NotNull Collection<EntranceApproval> entrances)
     {
         this.cheeseDensitySampler = cheeseDensitySampler;
