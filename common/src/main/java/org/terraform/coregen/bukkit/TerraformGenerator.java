@@ -19,19 +19,12 @@ import org.terraform.cave.v3.CaveResolvedType;
 import org.terraform.cave.v3.CaveSnapshotStoreV3;
 import org.terraform.cave.v3.CaveSnapshotV3;
 import org.terraform.cave.v3.CaveSnapshotV3Builder;
-import org.terraform.cave.v3.CompositeVoxelSample;
-import org.terraform.cave.v3.EntranceApprovalResolverV3;
-import org.terraform.cave.v3.EntranceApproval;
-import org.terraform.cave.v3.EntranceApprovalStore;
-import org.terraform.cave.v3.EntranceApprovalTrace;
 import org.terraform.cave.v3.SurfaceConnectivity;
-import org.terraform.cave.v3.generation.CaveFieldProvider;
 import org.terraform.cave.v3.generation.CaveFieldSampler;
 import org.terraform.cave.v3.generation.CompositeCaveSampler;
 import org.terraform.cave.v3.generation.CompositeCaveGeneratorMode;
 import org.terraform.cave.v3.generation.DensityCompositeCaveSampler;
 import org.terraform.cave.v3.generation.Phase3ACheeseFieldProvider;
-import org.terraform.cave.v3.generation.Phase3BSpaghettiFieldProvider;
 import org.terraform.coregen.ChunkCache;
 import org.terraform.coregen.HeightMap;
 import org.terraform.coregen.TerraformPopulator;
@@ -63,76 +56,6 @@ public class TerraformGenerator extends ChunkGenerator {
     public static int seaLevel = 62;
     private record CarvedInterval(short ceilingAirY, short floorSolidY) {}
 
-    private static final class DensityEntranceDebugStats implements EntranceApprovalTrace {
-        private final TerraformWorld tw;
-        private final int chunkX;
-        private final int chunkZ;
-        private int rawSeeds;
-        private int localSearchCandidates;
-        private int safeSurfacePasses;
-        private int slopePasses;
-        private int accepted;
-        private int targetPasses;
-        private int approvals;
-        private int entranceCarvedBlocks;
-
-        private DensityEntranceDebugStats(@NotNull TerraformWorld tw, int chunkX, int chunkZ) {
-            this.tw = tw;
-            this.chunkX = chunkX;
-            this.chunkZ = chunkZ;
-        }
-
-        @Override
-        public void recordRawSeed() {
-            rawSeeds++;
-        }
-
-        @Override
-        public void recordLocalSearchCandidate() {
-            localSearchCandidates++;
-        }
-
-        @Override
-        public void recordSafeSurfacePass() {
-            safeSurfacePasses++;
-        }
-
-        @Override
-        public void recordSlopePass() {
-            slopePasses++;
-        }
-
-        @Override
-        public void recordTargetPass() {
-            targetPasses++;
-        }
-
-        @Override
-        public void recordAccepted(@NotNull EntranceApproval approval) {
-            approvals++;
-            accepted++;
-            logApplied(approval.mouthRawX(), approval.mouthRawZ());
-        }
-
-        private void logApplied(int rawX, int rawZ) {
-            TerraformGeneratorPlugin.logger.info("[Entrances] applied at (" + rawX + "," + rawZ + ")");
-        }
-
-        private void logSummary() {
-            TerraformGeneratorPlugin.logger.info(
-                    "[Entrances] " + tw.getName() + " chunk " + chunkX + "," + chunkZ
-                    + " rawSeeds=" + rawSeeds
-                    + " localSearch=" + localSearchCandidates
-                    + " safe=" + safeSurfacePasses
-                    + " slope=" + slopePasses
-                    + " target=" + targetPasses
-                    + " approvals=" + approvals
-                    + " entranceBlocks=" + entranceCarvedBlocks
-                    + " accepted=" + accepted
-            );
-        }
-    }
-
     public static void updateSeaLevelFromConfig() {
         seaLevel = TConfig.c.HEIGHT_MAP_SEA_LEVEL;
     }
@@ -163,18 +86,10 @@ public class TerraformGenerator extends ChunkGenerator {
                     tw,
                     chunkX,
                     chunkZ,
-                    EntranceApprovalResolverV3.getRequiredPadding()
+                    0
             );
             CaveFieldSampler densitySampler = new Phase3ACheeseFieldProvider().createSampler(tw);
-            CaveFieldSampler spaghettiSampler = new Phase3BSpaghettiFieldProvider().createSampler(tw);
-            Collection<EntranceApproval> entranceApprovals = TConfig.c.CAVES_DENSITY_V1_ENTRANCES_ENABLED
-                                                             ? EntranceApprovalStore.getApprovedEntrancesTouchingChunk(tw, chunkX, chunkZ)
-                                                             : Collections.emptyList();
-            CompositeCaveSampler compositeSampler = new DensityCompositeCaveSampler(
-                    densitySampler,
-                    spaghettiSampler,
-                    entranceApprovals
-            );
+            CompositeCaveSampler compositeSampler = createCompositeV3Sampler(densitySampler);
             for (int x = 0; x < 16; x++) {
                 for (int z = 0; z < 16; z++) {
                     int rawX = chunkX * 16 + x;
@@ -299,7 +214,7 @@ public class TerraformGenerator extends ChunkGenerator {
                 tw,
                 chunkX,
                 chunkZ,
-                EntranceApprovalResolverV3.getRequiredPadding()
+                0
         );
         short[] baseSurfaceYByColumn = new short[256];
         for (int x = 0; x < 16; x++) {
@@ -312,8 +227,6 @@ public class TerraformGenerator extends ChunkGenerator {
 
         // For transformation ONLY
         Random transformRandom = tw.getHashedRand(chunkX, chunkZ, 31278);
-        CompositeCaveSampler compositeSampler = null;
-        DensityEntranceDebugStats entranceDebugStats = null;
 
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
@@ -332,22 +245,19 @@ public class TerraformGenerator extends ChunkGenerator {
                 chunkData.setRegion(x,TerraformGeneratorPlugin.injector.getMinY(),z,
                         x+1, 0,z+1, CommonMat.DEEPSLATE);
 
-                if (caveMode == CompositeCaveGeneratorMode.LEGACY) {
-                    //Iterate the remaining area to carve out caves
-                    for (int y = (int) height; y >= TerraformGeneratorPlugin.injector.getMinY(); y--) {
-                       if (y >= 0 && y <= 2) {
-                           chunkData.setBlock(x, y, z, GenUtils.randChoice(
-                                   dontCareRandom,CommonMat.DEEPSLATE, CommonMat.STONE));
-                        }
-
-                        // Set cave air if a cave CAN be carved here
-                        if (tw.noiseCaveRegistry.canNoiseCarve(rawX, y, rawZ, height, cache)) {
-                            chunkData.setBlock(x, y, z, CommonMat.CAVE_AIR);
-                            cache.cacheNonSolid(x,y,z);
-                        }
-                        else cache.cacheSolid(x,y,z);
-
+                // Iterate the remaining area to carve out caves.
+                for (int y = (int) height; y >= TerraformGeneratorPlugin.injector.getMinY(); y--) {
+                    if (y >= 0 && y <= 2) {
+                        chunkData.setBlock(x, y, z, GenUtils.randChoice(
+                                dontCareRandom,CommonMat.DEEPSLATE, CommonMat.STONE));
                     }
+
+                    // Set cave air if a cave CAN be carved here
+                    if (tw.noiseCaveRegistry.canNoiseCarve(rawX, y, rawZ, height, cache)) {
+                        chunkData.setBlock(x, y, z, CommonMat.CAVE_AIR);
+                        cache.cacheNonSolid(x,y,z);
+                    }
+                    else cache.cacheSolid(x,y,z);
                 }
 
                 // PERFORM SURFACE AND CAVE CARVING
@@ -361,37 +271,21 @@ public class TerraformGenerator extends ChunkGenerator {
                 // Water for below certain heights
                 chunkData.setRegion(x, (int) (height + 1),z,x+1,seaLevel+1,z+1, CommonMat.WATER);
                 BiomeHandler transformHandler = bank.getHandler().getTransformHandler();
-                if (caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3 && transformHandler != null) {
-                    transformHandler.transformTerrain(cache, tw, transformRandom, chunkData, x, z, chunkX, chunkZ);
-                }
 
-                List<CarvedInterval> caveIntervals = caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3
-                                                   ? carveDensityFieldColumn(
-                                                           compositeSampler,
-                                                           cache,
-                                                           chunkData,
-                                                           dontCareRandom,
-                                                           x,
-                                                           z,
-                                                           rawX,
-                                                           rawZ,
-                                                           baseSurfaceYByColumn[getColumnIndex(x, z)],
-                                                           entranceDebugStats
-                                                   )
-                                                   : carveLegacyAmbientCaves(
-                                                           tw,
-                                                           cache,
-                                                           chunkData,
-                                                           x,
-                                                           z,
-                                                           rawX,
-                                                           rawZ,
-                                                           height
-                                                   );
+                List<CarvedInterval> caveIntervals = carveLegacyAmbientCaves(
+                        tw,
+                        cache,
+                        chunkData,
+                        x,
+                        z,
+                        rawX,
+                        rawZ,
+                        height
+                );
 
                 // Transform height AFTER sea level is written.
                 // Transformed below-sea areas are not supposed to be water.
-                if (transformHandler != null && caveMode != CompositeCaveGeneratorMode.COMPOSITE_V3) {
+                if (transformHandler != null) {
                     transformHandler.transformTerrain(cache, tw, transformRandom, chunkData, x, z, chunkX, chunkZ);
                 }
                 caveIntervalsByColumn[getColumnIndex(x, z)] = caveIntervals;
@@ -418,8 +312,8 @@ public class TerraformGenerator extends ChunkGenerator {
                         baseSurfaceYByColumn[columnIndex],
                         cache.getTransformedHeight(x, z),
                         toV3Intervals(
-                                caveMode,
-                                compositeSampler,
+                                CompositeCaveGeneratorMode.LEGACY,
+                                null,
                                 cache,
                                 x,
                                 z,
@@ -435,9 +329,6 @@ public class TerraformGenerator extends ChunkGenerator {
         CaveSnapshotV3 snapshotV3 = caveBuilderV3.build();
         CaveSnapshotStoreV3.publishGameplay(tw, chunkX, chunkZ, snapshotV3);
         CaveSnapshotStoreV3.publishTooling(tw, chunkX, chunkZ, snapshotV3);
-        if (entranceDebugStats != null) {
-            entranceDebugStats.logSummary();
-        }
     }
 
     private void generateCompositeV3Noise(@NotNull TerraformWorld tw,
@@ -455,7 +346,7 @@ public class TerraformGenerator extends ChunkGenerator {
                 tw,
                 chunkX,
                 chunkZ,
-                EntranceApprovalResolverV3.getRequiredPadding()
+                0
         );
         short[] baseSurfaceYByColumn = new short[256];
         for (int x = 0; x < 16; x++) {
@@ -467,32 +358,8 @@ public class TerraformGenerator extends ChunkGenerator {
         }
         surfaceChunk.copyBaseSurfaceHeightsTo(cache);
 
-        CaveFieldProvider fieldProvider = new Phase3ACheeseFieldProvider();
-        CaveFieldSampler densitySampler = fieldProvider.createSampler(tw);
-        CaveFieldSampler spaghettiSampler = new Phase3BSpaghettiFieldProvider().createSampler(tw);
-        DensityEntranceDebugStats entranceDebugStats = TConfig.c.CAVES_DENSITY_V1_ENTRANCES_ENABLED
-                                                       && TConfig.c.CAVES_DENSITY_V1_ENTRANCES_DEBUG
-                                                       ? new DensityEntranceDebugStats(tw, chunkX, chunkZ)
-                                                       : null;
-        Collection<EntranceApproval> entranceApprovals = TConfig.c.CAVES_DENSITY_V1_ENTRANCES_ENABLED
-                                                         ? entranceDebugStats != null
-                                                           ? EntranceApprovalStore.traceApprovedEntrancesTouchingChunk(
-                                                                   tw,
-                                                                   chunkX,
-                                                                   chunkZ,
-                                                                   entranceDebugStats
-                                                           )
-                                                           : EntranceApprovalStore.getApprovedEntrancesTouchingChunk(
-                                                                   tw,
-                                                                   chunkX,
-                                                                   chunkZ
-                                                           )
-                                                         : Collections.emptyList();
-        CompositeCaveSampler compositeSampler = new DensityCompositeCaveSampler(
-                densitySampler,
-                spaghettiSampler,
-                entranceApprovals
-        );
+        CaveFieldSampler densitySampler = new Phase3ACheeseFieldProvider().createSampler(tw);
+        CompositeCaveSampler compositeSampler = createCompositeV3Sampler(densitySampler);
 
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
@@ -530,8 +397,7 @@ public class TerraformGenerator extends ChunkGenerator {
                         z,
                         rawX,
                         rawZ,
-                        baseSurfaceYByColumn[columnIndex],
-                        entranceDebugStats
+                        baseSurfaceYByColumn[columnIndex]
                 );
 
                 for (int i = 1; i < TConfig.c.HEIGHT_MAP_BEDROCK_HEIGHT; i++) {
@@ -579,9 +445,6 @@ public class TerraformGenerator extends ChunkGenerator {
         CaveSnapshotV3 snapshotV3 = caveBuilderV3.build();
         CaveSnapshotStoreV3.publishGameplay(tw, chunkX, chunkZ, snapshotV3);
         CaveSnapshotStoreV3.publishTooling(tw, chunkX, chunkZ, snapshotV3);
-        if (entranceDebugStats != null) {
-            entranceDebugStats.logSummary();
-        }
     }
 
     private static boolean isInsideChunk(int localX, int localZ) {
@@ -637,6 +500,10 @@ public class TerraformGenerator extends ChunkGenerator {
         return toCaveIntervals(rawPairs);
     }
 
+    private static @NotNull CompositeCaveSampler createCompositeV3Sampler(@NotNull CaveFieldSampler densitySampler) {
+        return new DensityCompositeCaveSampler(densitySampler);
+    }
+
     private static @NotNull List<CarvedInterval> carveDensityFieldColumn(@NotNull CompositeCaveSampler compositeSampler,
                                                                          @NotNull ChunkCache cache,
                                                                          @NotNull ChunkData chunkData,
@@ -645,8 +512,7 @@ public class TerraformGenerator extends ChunkGenerator {
                                                                          int localZ,
                                                                          int rawX,
                                                                          int rawZ,
-                                                                         double surfaceHeight,
-                                                                         DensityEntranceDebugStats debugStats)
+                                                                         double surfaceHeight)
     {
         final int minY = TerraformGeneratorPlugin.injector.getMinY();
         final int invalHeight = minY - 1;
@@ -665,22 +531,12 @@ public class TerraformGenerator extends ChunkGenerator {
             }
 
             boolean isCarved = false;
-            CompositeVoxelSample debugSample = null;
             if (TConfig.areCavesEnabled()) {
-                if (debugStats != null) {
-                    debugSample = compositeSampler.sampleDebug(rawX, y, rawZ, surfaceHeight);
-                    isCarved = debugSample.finalScore() >= 0f;
-                }
-                else {
-                    isCarved = compositeSampler.canCarve(rawX, y, rawZ, surfaceHeight);
-                }
+                isCarved = compositeSampler.canCarve(rawX, y, rawZ, surfaceHeight);
             }
             if (isCarved) {
                 chunkData.setBlock(localX, y, localZ, CommonMat.CAVE_AIR);
                 cache.cacheNonSolid(localX, y, localZ);
-                if (debugSample != null && debugSample.resolvedType() == CaveResolvedType.ENTRANCE && debugStats != null) {
-                    debugStats.entranceCarvedBlocks++;
-                }
                 if (y > minY && mustUpdateHeight) {
                     cache.writeTransformedHeight(localX, localZ, (short) (y - 1));
                 }
@@ -759,57 +615,16 @@ public class TerraformGenerator extends ChunkGenerator {
             return new CaveIntervalMetadata(CaveResolvedType.CHEESE, 1f, connectivity);
         }
 
-        int entranceVotes = 0;
-        int spaghettiVotes = 0;
-        int cheeseVotes = 0;
-        float entranceScoreSum = 0f;
-        float spaghettiScoreSum = 0f;
-        float cheeseScoreSum = 0f;
         float totalConfidence = 0f;
         int samples = 0;
 
         for (int y = interval.floorSolidY() + 1; y <= interval.ceilingAirY(); y++) {
-            CompositeVoxelSample voxelSample = compositeSampler.sampleDebug(rawX, y, rawZ, baseSurfaceHeight);
-            float finalScore = voxelSample.finalScore();
-            totalConfidence += voxelSample.confidence();
+            totalConfidence += compositeSampler.sampleDebug(rawX, y, rawZ, baseSurfaceHeight).confidence();
             samples++;
-            switch (voxelSample.resolvedType()) {
-                case ENTRANCE -> {
-                    entranceVotes++;
-                    entranceScoreSum += finalScore;
-                }
-                case SPAGHETTI -> {
-                    spaghettiVotes++;
-                    spaghettiScoreSum += finalScore;
-                }
-                case CHEESE -> {
-                    cheeseVotes++;
-                    cheeseScoreSum += finalScore;
-                }
-            }
         }
 
-        CaveResolvedType resolvedType;
-        if (entranceVotes > cheeseVotes && entranceVotes > spaghettiVotes) {
-            resolvedType = CaveResolvedType.ENTRANCE;
-        }
-        else if (cheeseVotes > entranceVotes && cheeseVotes > spaghettiVotes) {
-            resolvedType = CaveResolvedType.CHEESE;
-        }
-        else if (spaghettiVotes > entranceVotes && spaghettiVotes > cheeseVotes) {
-            resolvedType = CaveResolvedType.SPAGHETTI;
-        }
-        else if (entranceScoreSum >= cheeseScoreSum && entranceScoreSum >= spaghettiScoreSum) {
-            resolvedType = CaveResolvedType.ENTRANCE;
-        }
-        else if (cheeseScoreSum >= spaghettiScoreSum) {
-            resolvedType = CaveResolvedType.CHEESE;
-        }
-        else {
-            resolvedType = CaveResolvedType.SPAGHETTI;
-        }
         float confidence = samples == 0 ? 0f : totalConfidence / samples;
-        return new CaveIntervalMetadata(resolvedType, confidence, connectivity);
+        return new CaveIntervalMetadata(CaveResolvedType.CHEESE, confidence, connectivity);
     }
 
     private static @NotNull List<CarvedInterval> toCaveIntervals(@NotNull Collection<CoordPair> rawPairs) {

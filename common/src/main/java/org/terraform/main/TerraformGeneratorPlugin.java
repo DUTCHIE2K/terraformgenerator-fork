@@ -13,7 +13,6 @@ import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
 import org.terraform.cave.v3.BaseSurfaceMapStoreV3;
 import org.terraform.cave.v3.CaveSnapshotStoreV3;
-import org.terraform.cave.v3.EntranceApprovalStore;
 import org.terraform.coregen.ChunkCache;
 import org.terraform.coregen.HeightMap;
 import org.terraform.coregen.NMSInjectorAbstract;
@@ -145,6 +144,7 @@ public class TerraformGeneratorPlugin extends JavaPlugin implements Listener {
         new TerraformGeneratorMetricsHandler(this); // bStats
 
         TerraformGenerator.updateSeaLevelFromConfig();
+        logger.stdout("Cave generator mode: " + TConfig.c.CAVES_GENERATOR_MODE + " (chamber baseline)");
         new TerraformCommandManager(this, "terraform", "terra");
         Bukkit.getPluginManager().registerEvents(this, this);
         Bukkit.getPluginManager().registerEvents(new SchematicListener(), this);
@@ -252,7 +252,6 @@ public class TerraformGeneratorPlugin extends JavaPlugin implements Listener {
             NoiseCacheHandler.flushNoiseCaches(tw);
             CaveSnapshotStoreV3.clearWorld(tw);
             BaseSurfaceMapStoreV3.clearWorld(tw);
-            EntranceApprovalStore.clearWorld(tw);
         }
     }
 

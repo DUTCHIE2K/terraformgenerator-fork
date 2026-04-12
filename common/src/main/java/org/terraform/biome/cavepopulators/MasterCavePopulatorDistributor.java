@@ -118,7 +118,7 @@ public class MasterCavePopulatorDistributor {
 
                     AbstractCavePopulator pop;
 
-                    if (candidate.metadata().resolvedType() == CaveResolvedType.ENTRANCE) {
+                    if (candidate.metadata().openToSurface() == SurfaceConnectivity.YES) {
                         pop = new EmptyCavePopulator();
                     }
                     else if (reg == null && clusterDecoratedPairs.contains(AbstractCaveClusterPopulator.getDecoratedPairKey(
@@ -267,7 +267,7 @@ public class MasterCavePopulatorDistributor {
     }
 
     private static boolean isClusterCandidate(@NotNull CaveDecorationCandidate candidate) {
-        return candidate.metadata().resolvedType() != CaveResolvedType.ENTRANCE;
+        return candidate.metadata().openToSurface() != SurfaceConnectivity.YES;
     }
 
     public static @NotNull Collection<CoordPair> getFilteredPairs(@NotNull Collection<CoordPair> pairs,

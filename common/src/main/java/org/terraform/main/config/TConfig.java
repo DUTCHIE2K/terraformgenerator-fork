@@ -408,26 +408,6 @@ public class TConfig extends YamlFileInterface {
     public int CAVES_DENSITY_V1_SEA_LEVEL_FADE_DEPTH = 6;
     @YamlKey("caves.density-v1.sea-level-max-threshold-penalty")
     public float CAVES_DENSITY_V1_SEA_LEVEL_MAX_THRESHOLD_PENALTY = 0.25f;
-    @YamlKey("caves.density-v1.spaghetti.frequency")
-    public float CAVES_DENSITY_V1_SPAGHETTI_FREQUENCY = 0.007f;
-    @YamlKey("caves.density-v1.spaghetti.threshold")
-    public float CAVES_DENSITY_V1_SPAGHETTI_THRESHOLD = -1.3f;
-    @YamlKey("caves.density-v1.spaghetti.max-depth")
-    public int CAVES_DENSITY_V1_SPAGHETTI_MAX_DEPTH = 50;
-    @YamlKey("caves.density-v1.entrances.enabled")
-    public boolean CAVES_DENSITY_V1_ENTRANCES_ENABLED = true;
-    @YamlKey("caves.density-v1.entrances.spacing")
-    public int CAVES_DENSITY_V1_ENTRANCES_SPACING = 64;
-    @YamlKey("caves.density-v1.entrances.validation-radius")
-    public int CAVES_DENSITY_V1_ENTRANCES_VALIDATION_RADIUS = 3;
-    @YamlKey("caves.density-v1.entrances.minimum-cave-depth")
-    public int CAVES_DENSITY_V1_ENTRANCES_MINIMUM_CAVE_DEPTH = 6;
-    @YamlKey("caves.density-v1.entrances.maximum-cave-depth")
-    public int CAVES_DENSITY_V1_ENTRANCES_MAXIMUM_CAVE_DEPTH = 24;
-    @YamlKey("caves.density-v1.entrances.minimum-slope-drop")
-    public int CAVES_DENSITY_V1_ENTRANCES_MINIMUM_SLOPE_DROP = 3;
-    @YamlKey("caves.density-v1.entrances.debug")
-    public boolean CAVES_DENSITY_V1_ENTRANCES_DEBUG = false;
     // CAVES_ALLOW_FLOODED_RAVINES("caves.allow-flooded-ravines",true),
 
     // -=[STRUCTURES]=-
