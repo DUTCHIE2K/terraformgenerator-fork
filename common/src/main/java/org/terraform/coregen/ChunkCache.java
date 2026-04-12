@@ -31,6 +31,7 @@ public class ChunkCache {
     short[] highestGroundCache;
     short[] transformedGroundCache;
     float[] yBarrierNoiseCache;
+    float[] bottomSealYCache;
     volatile boolean transformedHeightsFilled;
 
     CompressedChunkBools solids;
@@ -50,6 +51,8 @@ public class ChunkCache {
         Arrays.fill(transformedGroundCache, (short) CHUNKCACHE_INVAL);
         yBarrierNoiseCache = new float[256];
         Arrays.fill(yBarrierNoiseCache, CHUNKCACHE_INVAL);
+        bottomSealYCache = new float[256];
+        Arrays.fill(bottomSealYCache, CHUNKCACHE_INVAL);
         highestGroundCache = new short[256];
         Arrays.fill(highestGroundCache, (short) CHUNKCACHE_INVAL);
         transformedHeightsFilled = false;
@@ -119,6 +122,14 @@ public class ChunkCache {
 
     public void cacheYBarrierNoise(int chunkSubX, int chunkSubZ, float val) {
         yBarrierNoiseCache[chunkSubX + 16 * chunkSubZ] = val;
+    }
+
+    public float getBottomSealY(int chunkSubX, int chunkSubZ) {
+        return bottomSealYCache[chunkSubX + 16 * chunkSubZ];
+    }
+
+    public void cacheBottomSealY(int chunkSubX, int chunkSubZ, float val) {
+        bottomSealYCache[chunkSubX + 16 * chunkSubZ] = val;
     }
 
     /**

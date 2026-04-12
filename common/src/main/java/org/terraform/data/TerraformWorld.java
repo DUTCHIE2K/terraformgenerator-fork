@@ -5,6 +5,10 @@ import org.bukkit.World;
 import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
 import org.terraform.cave.NoiseCaveRegistry;
+import org.terraform.cave.v3.generation.CaveFieldSampler;
+import org.terraform.cave.v3.generation.CompositeCaveSampler;
+import org.terraform.cave.v3.generation.DensityCompositeCaveSampler;
+import org.terraform.cave.v3.generation.Phase3ACheeseFieldProvider;
 import org.terraform.coregen.ChunkCache;
 import org.terraform.coregen.HeightMap;
 import org.terraform.coregen.bukkit.TerraformBukkitBlockPopulator;
@@ -23,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TerraformWorld {
     private static final ConcurrentHashMap<String, TerraformWorld> WORLDS = new ConcurrentHashMap<>();
     public final @NotNull NoiseCaveRegistry noiseCaveRegistry;
+    private volatile CompositeCaveSampler compositeV3CaveSampler;
     private final String worldName;
     private final long seed;
     private final @NotNull TerraformBukkitBlockPopulator bukkitBlockPopulator;
@@ -114,6 +119,28 @@ public class TerraformWorld {
 
     public @NotNull Random getHashedRand(int x, int y, int z, long multiplier) {
         return new Random(Objects.hash(seed, 11 * x, 127 * y, 773 * z) * multiplier);
+    }
+
+    public @NotNull CompositeCaveSampler getCompositeV3CaveSampler() {
+        CompositeCaveSampler sampler = compositeV3CaveSampler;
+        if (sampler != null) {
+            return sampler;
+        }
+
+        synchronized (this) {
+            sampler = compositeV3CaveSampler;
+            if (sampler == null) {
+                CaveFieldSampler densitySampler = new Phase3ACheeseFieldProvider().createSampler(this);
+                sampler = new DensityCompositeCaveSampler(this, densitySampler);
+                compositeV3CaveSampler = sampler;
+            }
+        }
+
+        return sampler;
+    }
+
+    public void clearTransientGenerationCaches() {
+        compositeV3CaveSampler = null;
     }
 
     /**

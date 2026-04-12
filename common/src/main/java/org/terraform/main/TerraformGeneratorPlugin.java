@@ -250,6 +250,7 @@ public class TerraformGeneratorPlugin extends JavaPlugin implements Listener {
             TerraformWorld tw = TerraformWorld.get(event.getWorld());
             logger.stdout("Flushing noise cache for world " + event.getWorld().getName());
             NoiseCacheHandler.flushNoiseCaches(tw);
+            tw.clearTransientGenerationCaches();
             CaveSnapshotStoreV3.clearWorld(tw);
             BaseSurfaceMapStoreV3.clearWorld(tw);
         }

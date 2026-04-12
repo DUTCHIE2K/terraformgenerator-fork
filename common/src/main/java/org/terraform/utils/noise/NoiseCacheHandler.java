@@ -114,6 +114,7 @@ public class NoiseCacheHandler {
         CAVE_V2_PHASE3A_DENSITY,
         CAVE_V3_CHEESE_WARP_NOISE,
         CAVE_V3_CHEESE_BODY_NOISE,
+        CAVE_V3_BOTTOM_SEAL_NOISE,
 
         STRUCTURE_LARGECAVE_CARVER,
 

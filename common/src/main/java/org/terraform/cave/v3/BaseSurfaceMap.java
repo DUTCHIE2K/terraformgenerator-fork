@@ -9,11 +9,11 @@ public final class BaseSurfaceMap {
     private final int depth;
     private final BaseSurfaceColumn @NotNull [] columns;
 
-    public BaseSurfaceMap(int minRawX,
-                          int minRawZ,
-                          int width,
-                          int depth,
-                          BaseSurfaceColumn @NotNull [] columns)
+    BaseSurfaceMap(int minRawX,
+                   int minRawZ,
+                   int width,
+                   int depth,
+                   BaseSurfaceColumn @NotNull [] columns)
     {
         if (width <= 0 || depth <= 0) {
             throw new IllegalArgumentException("BaseSurfaceMap dimensions must be positive");
@@ -25,7 +25,7 @@ public final class BaseSurfaceMap {
         this.minRawZ = minRawZ;
         this.width = width;
         this.depth = depth;
-        this.columns = columns.clone();
+        this.columns = columns;
     }
 
     public int getMinRawX() {

@@ -3,16 +3,17 @@ package org.terraform.cave.v3;
 import org.bukkit.Material;
 import org.bukkit.generator.ChunkGenerator;
 import org.jetbrains.annotations.NotNull;
-import org.terraform.coregen.ChunkCache;
 
 public final class BaseSurfaceChunkV3 {
+    static final SurfaceBlockWrite[] NO_WRITES = new SurfaceBlockWrite[0];
+
     private final short[] rawTerrainHeights;
     private final BaseSurfaceColumn[] surfaceColumns;
     private final SurfaceBlockWrite[][] surfaceWritesByColumn;
 
-    public BaseSurfaceChunkV3(short @NotNull [] rawTerrainHeights,
-                              BaseSurfaceColumn @NotNull [] surfaceColumns,
-                              SurfaceBlockWrite[] @NotNull [] surfaceWritesByColumn)
+    BaseSurfaceChunkV3(short @NotNull [] rawTerrainHeights,
+                       BaseSurfaceColumn @NotNull [] surfaceColumns,
+                       SurfaceBlockWrite[] @NotNull [] surfaceWritesByColumn)
     {
         if (rawTerrainHeights.length != 256) {
             throw new IllegalArgumentException("BaseSurfaceChunkV3 requires exactly 256 raw terrain heights");
@@ -23,14 +24,13 @@ public final class BaseSurfaceChunkV3 {
         if (surfaceWritesByColumn.length != 256) {
             throw new IllegalArgumentException("BaseSurfaceChunkV3 requires exactly 256 surface write columns");
         }
-        this.rawTerrainHeights = rawTerrainHeights.clone();
-        this.surfaceColumns = surfaceColumns.clone();
-        this.surfaceWritesByColumn = new SurfaceBlockWrite[256][];
-        for (int i = 0; i < surfaceWritesByColumn.length; i++) {
-            SurfaceBlockWrite[] columnWrites = surfaceWritesByColumn[i] == null
-                                               ? new SurfaceBlockWrite[0]
-                                               : surfaceWritesByColumn[i];
-            this.surfaceWritesByColumn[i] = columnWrites.clone();
+        this.rawTerrainHeights = rawTerrainHeights;
+        this.surfaceColumns = surfaceColumns;
+        this.surfaceWritesByColumn = surfaceWritesByColumn;
+        for (int i = 0; i < this.surfaceWritesByColumn.length; i++) {
+            if (this.surfaceWritesByColumn[i] == null) {
+                this.surfaceWritesByColumn[i] = NO_WRITES;
+            }
         }
     }
 
@@ -38,16 +38,12 @@ public final class BaseSurfaceChunkV3 {
         return rawTerrainHeights[index(localX, localZ)];
     }
 
-    public @NotNull BaseSurfaceColumn getColumn(int localX, int localZ) {
-        return surfaceColumns[index(localX, localZ)];
+    public short getBaseSurfaceY(int localX, int localZ) {
+        return surfaceColumns[index(localX, localZ)].baseSurfaceY();
     }
 
-    public void copyBaseSurfaceHeightsTo(@NotNull ChunkCache cache) {
-        for (int localX = 0; localX < 16; localX++) {
-            for (int localZ = 0; localZ < 16; localZ++) {
-                cache.writeTransformedHeight(localX, localZ, getColumn(localX, localZ).baseSurfaceY());
-            }
-        }
+    public @NotNull BaseSurfaceColumn getColumn(int localX, int localZ) {
+        return surfaceColumns[index(localX, localZ)];
     }
 
     public void replaySurfaceWrites(ChunkGenerator.@NotNull ChunkData chunkData, int localX, int localZ) {

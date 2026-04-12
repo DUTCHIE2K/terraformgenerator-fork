@@ -370,6 +370,9 @@ public class TConfig extends YamlFileInterface {
     // DEVSTUFF_EXPERIMENTAL_STRUCTURE_PLACEMENT("dev-stuff.experimental-structure-placement", false),
     @YamlKey("dev-stuff.debug-mode")
     public boolean DEVSTUFF_DEBUG_MODE = false;
+    @YamlComment("Collect Cave V3 timing counters for /terra timings. Leave this off unless you are profiling generation.")
+    @YamlKey("dev-stuff.cave-v3-profile")
+    public boolean DEVSTUFF_CAVE_V3_PROFILE = false;
     @YamlKey("dev-stuff.force-only-vanilla-mushrooms")
     public boolean DEVSTUFF_VANILLA_MUSHROOMS = false;
     @YamlKey("dev-stuff.patcher-cache-max-size")
@@ -386,16 +389,12 @@ public class TConfig extends YamlFileInterface {
     public boolean DEVSTUFF_VANILLA_LOCATE_DISABLE = false;
 
     // -=[CAVES]=-
-    @YamlKey("caves.allow-flooded-caves")
-    public boolean CAVES_ALLOW_FLOODED_CAVES = false;
     @YamlKey("caves.generator-mode")
     public String CAVES_GENERATOR_MODE = "COMPOSITE_V3";
     @YamlKey("caves.density-v1.frequency")
     public float CAVES_DENSITY_V1_FREQUENCY = 0.035f;
     @YamlKey("caves.density-v1.threshold")
     public float CAVES_DENSITY_V1_THRESHOLD = 0.45f;
-    @YamlKey("caves.density-v1.confidence-scale")
-    public float CAVES_DENSITY_V1_CONFIDENCE_SCALE = 0.4f;
     @YamlKey("caves.density-v1.surface-no-carve-clearance")
     public int CAVES_DENSITY_V1_SURFACE_NO_CARVE_CLEARANCE = 8;
     @YamlKey("caves.density-v1.surface-full-carve-clearance")
@@ -408,6 +407,18 @@ public class TConfig extends YamlFileInterface {
     public int CAVES_DENSITY_V1_SEA_LEVEL_FADE_DEPTH = 6;
     @YamlKey("caves.density-v1.sea-level-max-threshold-penalty")
     public float CAVES_DENSITY_V1_SEA_LEVEL_MAX_THRESHOLD_PENALTY = 0.25f;
+    @YamlKey("caves.density-v1.bottom-seal-enabled")
+    public boolean CAVES_DENSITY_V1_BOTTOM_SEAL_ENABLED = true;
+    @YamlKey("caves.density-v1.bottom-seal-frequency")
+    public float CAVES_DENSITY_V1_BOTTOM_SEAL_FREQUENCY = 0.02f;
+    @YamlKey("caves.density-v1.bottom-seal-min-cover")
+    public int CAVES_DENSITY_V1_BOTTOM_SEAL_MIN_COVER = 2;
+    @YamlKey("caves.density-v1.bottom-seal-noise-rise")
+    public int CAVES_DENSITY_V1_BOTTOM_SEAL_NOISE_RISE = 5;
+    @YamlKey("caves.density-v1.bottom-seal-fade-height")
+    public int CAVES_DENSITY_V1_BOTTOM_SEAL_FADE_HEIGHT = 5;
+    @YamlKey("caves.density-v1.bottom-seal-max-threshold-penalty")
+    public float CAVES_DENSITY_V1_BOTTOM_SEAL_MAX_THRESHOLD_PENALTY = 0.25f;
     // CAVES_ALLOW_FLOODED_RAVINES("caves.allow-flooded-ravines",true),
 
     // -=[STRUCTURES]=-

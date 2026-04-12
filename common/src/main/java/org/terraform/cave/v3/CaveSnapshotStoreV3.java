@@ -9,7 +9,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class CaveSnapshotStoreV3 {
     private static final ConcurrentHashMap<TWCoordPair, CaveSnapshotV3> GAMEPLAY = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<TWCoordPair, CaveSnapshotV3> TOOLING = new ConcurrentHashMap<>();
 
     private CaveSnapshotStoreV3() {
     }
@@ -18,20 +17,11 @@ public final class CaveSnapshotStoreV3 {
         GAMEPLAY.put(new TWCoordPair(tw, chunkX, chunkZ), snapshot);
     }
 
-    public static void publishTooling(@NotNull TerraformWorld tw, int chunkX, int chunkZ, @NotNull CaveSnapshotV3 snapshot) {
-        TOOLING.put(new TWCoordPair(tw, chunkX, chunkZ), snapshot);
-    }
-
     public static @Nullable CaveSnapshotV3 takeGameplay(@NotNull TerraformWorld tw, int chunkX, int chunkZ) {
         return GAMEPLAY.remove(new TWCoordPair(tw, chunkX, chunkZ));
     }
 
-    public static @Nullable CaveSnapshotV3 peekTooling(@NotNull TerraformWorld tw, int chunkX, int chunkZ) {
-        return TOOLING.get(new TWCoordPair(tw, chunkX, chunkZ));
-    }
-
     public static void clearWorld(@NotNull TerraformWorld tw) {
         GAMEPLAY.keySet().removeIf(key -> key.tw().getName().equals(tw.getName()));
-        TOOLING.keySet().removeIf(key -> key.tw().getName().equals(tw.getName()));
     }
 }

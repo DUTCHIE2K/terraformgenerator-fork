@@ -1,55 +1,60 @@
 package org.terraform.cave.v3.generation;
 
 import org.jetbrains.annotations.NotNull;
-import org.terraform.cave.v3.CaveResolvedType;
-import org.terraform.cave.v3.CompositeVoxelSample;
-import org.terraform.main.config.TConfig;
+import org.terraform.coregen.ChunkCache;
+import org.terraform.data.TerraformWorld;
 
 public final class DensityCompositeCaveSampler implements CompositeCaveSampler {
+    private final @NotNull TerraformWorld tw;
     private final @NotNull CaveFieldSampler cheeseDensitySampler;
 
-    public DensityCompositeCaveSampler(@NotNull CaveFieldSampler cheeseDensitySampler) {
+    public DensityCompositeCaveSampler(@NotNull TerraformWorld tw, @NotNull CaveFieldSampler cheeseDensitySampler) {
+        this.tw = tw;
         this.cheeseDensitySampler = cheeseDensitySampler;
     }
 
     @Override
-    public boolean canCarve(int rawX, int y, int rawZ, double baseSurfaceHeight) {
-        return evaluate(rawX, y, rawZ, baseSurfaceHeight).finalScore() >= 0f;
-    }
-
-    @Override
-    public @NotNull CompositeVoxelSample sampleDebug(int rawX, int y, int rawZ, double baseSurfaceHeight) {
-        ReductionResult result = evaluate(rawX, y, rawZ, baseSurfaceHeight);
-        float confidenceScale = Math.max(0.0001f, TConfig.c.CAVES_DENSITY_V1_CONFIDENCE_SCALE);
-        float confidence = result.finalScore() <= NEGATIVE_INFINITY_SCORE / 2f
-                           ? 0f
-                           : DensityCarveRules.clamp01(Math.abs(result.finalScore()) / confidenceScale);
-        return new CompositeVoxelSample(result.resolvedType(), result.finalScore(), confidence);
+    public boolean canCarve(int rawX, int y, int rawZ, double baseSurfaceHeight, @NotNull ChunkCache cache) {
+        return evaluate(rawX, y, rawZ, baseSurfaceHeight, cache) >= 0f;
     }
 
     private float getCheeseLocalScore(float baseDensity) {
-        return baseDensity - DensityCarveRules.getBaseThreshold();
+        float score = baseDensity - DensityCarveRules.getBaseThreshold();
+
+        // Soft threshold band (edge smoothing)
+        if (score > -0.08f && score < 0f) {
+            float t = (score + 0.08f) / 0.08f; // 0 → 1
+            score += 0.05f * t;
+        }
+
+        return score;
     }
 
-    private float applyStandardGlobalPenalty(int y, double baseSurfaceHeight, float localScore, float globalPenalty) {
+    private float applyStandardGlobalPenalty(int rawX,
+                                             int y,
+                                             int rawZ,
+                                             double baseSurfaceHeight,
+                                             float localScore,
+                                             @NotNull ChunkCache cache)
+    {
         if (localScore <= NEGATIVE_INFINITY_SCORE / 2f) {
             return NEGATIVE_INFINITY_SCORE;
         }
-        if (!DensityCarveRules.canCarveAtY(y, baseSurfaceHeight)) {
+        if (!DensityCarveRules.canCarveAtY(tw, rawX, y, rawZ, baseSurfaceHeight, cache)) {
             return NEGATIVE_INFINITY_SCORE;
         }
-        return localScore - globalPenalty;
+        return localScore - DensityCarveRules.getGlobalPenalty(tw, rawX, y, rawZ, baseSurfaceHeight, cache);
     }
 
-    private @NotNull ReductionResult evaluate(int rawX, int y, int rawZ, double baseSurfaceHeight) {
+    private float evaluate(int rawX, int y, int rawZ, double baseSurfaceHeight, @NotNull ChunkCache cache)
+    {
         float rawCheese = cheeseDensitySampler.sampleDensity(rawX, y, rawZ, baseSurfaceHeight);
         float cheeseLocalScore = getCheeseLocalScore(rawCheese);
-        float globalPenalty = DensityCarveRules.getGlobalPenalty(y, baseSurfaceHeight);
-        float cheeseScore = applyStandardGlobalPenalty(y, baseSurfaceHeight, cheeseLocalScore, globalPenalty);
-        return new ReductionResult(CaveResolvedType.CHEESE, cheeseScore);
-    }
-
-    private record ReductionResult(@NotNull CaveResolvedType resolvedType,
-                                   float finalScore) {
+        return applyStandardGlobalPenalty(rawX,
+                y,
+                rawZ,
+                baseSurfaceHeight,
+                cheeseLocalScore,
+                cache);
     }
 }

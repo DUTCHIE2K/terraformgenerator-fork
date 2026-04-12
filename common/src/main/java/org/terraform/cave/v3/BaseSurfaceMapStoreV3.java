@@ -14,7 +14,7 @@ import org.terraform.coregen.bukkit.TerraformGenerator;
 import org.terraform.data.TerraformWorld;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
@@ -157,7 +157,7 @@ public final class BaseSurfaceMapStoreV3 {
         private final int chunkX;
         private final int chunkZ;
         private final short[] rawTerrainHeights;
-        private final LinkedHashMap<Integer, Material> blockOverrides = new LinkedHashMap<>();
+        private final HashMap<Integer, Material> blockOverrides = new HashMap<>();
 
         private SurfaceCaptureChunkData(@NotNull TerraformWorld tw, int chunkX, int chunkZ, short[] rawTerrainHeights) {
             this.tw = tw;
@@ -329,7 +329,7 @@ public final class BaseSurfaceMapStoreV3 {
             for (int columnIndex = 0; columnIndex < result.length; columnIndex++) {
                 ArrayList<BaseSurfaceChunkV3.SurfaceBlockWrite> columnWrites = writesByColumn[columnIndex];
                 result[columnIndex] = columnWrites == null
-                                      ? new BaseSurfaceChunkV3.SurfaceBlockWrite[0]
+                                      ? BaseSurfaceChunkV3.NO_WRITES
                                       : columnWrites.toArray(new BaseSurfaceChunkV3.SurfaceBlockWrite[0]);
             }
             return result;

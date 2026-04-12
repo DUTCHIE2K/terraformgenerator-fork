@@ -2,11 +2,8 @@ package org.terraform.biome.cavepopulators;
 
 import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
-import org.terraform.cave.v2.CaveInterval;
-import org.terraform.cave.v2.CaveSnapshot;
 import org.terraform.cave.v3.CaveIntervalMetadata;
 import org.terraform.cave.v3.CaveIntervalV3;
-import org.terraform.cave.v3.CaveResolvedType;
 import org.terraform.cave.v3.CaveSnapshotV3;
 import org.terraform.cave.v3.SurfaceConnectivity;
 import org.terraform.coregen.populatordata.PopulatorDataAbstract;
@@ -29,21 +26,6 @@ public class MasterCavePopulatorDistributor {
     public static final int AMBIENT_MINIMUM_CAVE_HEIGHT = 4;
 
     private static final HashSet<Class<?>> populatedBefore = new HashSet<>();
-
-    public void populate(@NotNull TerraformWorld tw,
-                         @NotNull Random random,
-                         @NotNull PopulatorDataAbstract data,
-                         boolean generateClusters,
-                         @NotNull CaveSnapshot snapshot)
-    {
-        populateInternal(
-                tw,
-                random,
-                data,
-                generateClusters,
-                (localX, localZ) -> getSnapshotCandidates(snapshot, localX, localZ)
-        );
-    }
 
     public void populate(@NotNull TerraformWorld tw,
                          @NotNull Random random,
@@ -216,25 +198,6 @@ public class MasterCavePopulatorDistributor {
                 type.getSeparation(),
                 type.getPertub()
         );
-    }
-
-    private static @NotNull List<CaveDecorationCandidate> getSnapshotCandidates(@NotNull CaveSnapshot snapshot,
-                                                                                 int localX,
-                                                                                 int localZ)
-    {
-        List<CaveInterval> intervals = snapshot.getColumn(localX, localZ).getIntervals();
-        if (intervals.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        List<CaveDecorationCandidate> pairs = new ArrayList<>(intervals.size());
-        for (CaveInterval interval : intervals) {
-            pairs.add(new CaveDecorationCandidate(
-                    new CoordPair(interval.ceilingAirY(), interval.floorSolidY()),
-                    new CaveIntervalMetadata(CaveResolvedType.CHEESE, 1f, SurfaceConnectivity.UNKNOWN)
-            ));
-        }
-        return pairs;
     }
 
     private static @NotNull List<CaveDecorationCandidate> getSnapshotCandidates(@NotNull CaveSnapshotV3 snapshot,
