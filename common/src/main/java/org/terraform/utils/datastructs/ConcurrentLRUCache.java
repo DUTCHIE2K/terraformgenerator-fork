@@ -100,6 +100,33 @@ public final class ConcurrentLRUCache<K,V> {
         return node.value;
     }
 
+    public @Nullable V getIfPresent(K key) {
+        var localMap = localCache.get();
+        LRUNode<K, V> node = localMap.get(key);
+        if (node != null) {
+            node.lastAccess.lazySet(System.nanoTime());
+            return node.value;
+        }
+
+        readLock.lock();
+        try {
+            node = keyToValue.get(key);
+            if (node == null) {
+                return null;
+            }
+            node.lastAccess.lazySet(System.nanoTime());
+        }
+        finally {
+            readLock.unlock();
+        }
+
+        if (localMap.size() >= localCacheSize) {
+            localMap.clear();
+        }
+        localMap.put(key, node);
+        return node.value;
+    }
+
     /**
      * Assumes that the key was not already present
      */

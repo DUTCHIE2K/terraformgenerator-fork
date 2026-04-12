@@ -4,6 +4,7 @@ import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
 import org.terraform.cave.v3.CaveIntervalMetadata;
 import org.terraform.cave.v3.CaveIntervalV3;
+import org.terraform.cave.v3.CaveV3Profiler;
 import org.terraform.cave.v3.CaveSnapshotV3;
 import org.terraform.cave.v3.SurfaceConnectivity;
 import org.terraform.coregen.populatordata.PopulatorDataAbstract;
@@ -33,13 +34,15 @@ public class MasterCavePopulatorDistributor {
                          boolean generateClusters,
                          @NotNull CaveSnapshotV3 snapshot)
     {
-        populateInternal(
-                tw,
-                random,
-                data,
-                generateClusters,
-                (localX, localZ) -> getSnapshotCandidates(snapshot, localX, localZ)
-        );
+        try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start("cave-v3.populate")) {
+            populateInternal(
+                    tw,
+                    random,
+                    data,
+                    generateClusters,
+                    (localX, localZ) -> getSnapshotCandidates(snapshot, localX, localZ)
+            );
+        }
     }
 
     private void populateInternal(@NotNull TerraformWorld tw,

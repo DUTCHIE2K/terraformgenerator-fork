@@ -48,10 +48,8 @@ public final class CaveV3Profiler {
         for (var entry : STATS.entrySet()) {
             snapshots.add(entry.getValue().snapshot(entry.getKey()));
         }
-        snapshots.sort(Comparator.comparingLong(SectionSnapshot::totalNanos)
-                                 .reversed()
-                                 .thenComparingLong(SectionSnapshot::calls)
-                                 .reversed()
+        snapshots.sort(Comparator.comparingLong(SectionSnapshot::totalNanos).reversed()
+                                 .thenComparing(Comparator.comparingLong(SectionSnapshot::calls).reversed())
                                  .thenComparing(SectionSnapshot::key));
         return snapshots;
     }

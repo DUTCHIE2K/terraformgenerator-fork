@@ -12,6 +12,8 @@ import org.terraform.coregen.ChunkCache;
 import org.terraform.coregen.HeightMap;
 import org.terraform.coregen.bukkit.TerraformGenerator;
 import org.terraform.data.TerraformWorld;
+import org.terraform.main.config.TConfig;
+import org.terraform.utils.datastructs.ConcurrentLRUCache;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -20,15 +22,24 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class BaseSurfaceMapStoreV3 {
-    private static final ConcurrentHashMap<BaseSurfaceChunkKey, BaseSurfaceChunkV3> CHUNKS = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<BaseSurfaceMapKey, BaseSurfaceMap> MAPS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<TerraformWorld, SurfaceCaches> WORLD_CACHES = new ConcurrentHashMap<>();
 
     private BaseSurfaceMapStoreV3() {
     }
 
     public static @NotNull BaseSurfaceChunkV3 getBaseSurfaceChunk(@NotNull TerraformWorld tw, int chunkX, int chunkZ) {
-        BaseSurfaceChunkKey key = new BaseSurfaceChunkKey(tw, chunkX, chunkZ);
-        return CHUNKS.computeIfAbsent(key, ignored -> buildBaseSurfaceChunk(tw, chunkX, chunkZ));
+        SurfaceCaches caches = getWorldCaches(tw);
+        LocalChunkKey key = new LocalChunkKey(chunkX, chunkZ);
+        try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start("cave-v3.surface-chunk.get")) {
+            BaseSurfaceChunkV3 existing = caches.chunks().getIfPresent(key);
+            if (existing != null) {
+                CaveV3Profiler.recordEvent("cave-v3.surface-chunk.cache-hit");
+                return existing;
+            }
+
+            CaveV3Profiler.recordEvent("cave-v3.surface-chunk.cache-miss");
+            return caches.chunks().get(key);
+        }
     }
 
     public static @NotNull BaseSurfaceMap getBaseSurfaceMap(@NotNull TerraformWorld tw,
@@ -36,13 +47,32 @@ public final class BaseSurfaceMapStoreV3 {
                                                             int chunkZ,
                                                             int padding)
     {
-        BaseSurfaceMapKey key = new BaseSurfaceMapKey(tw, chunkX, chunkZ, padding);
-        return MAPS.computeIfAbsent(key, ignored -> buildBaseSurfaceMap(tw, chunkX, chunkZ, padding));
+        return getWorldCaches(tw).maps().get(new LocalMapKey(chunkX, chunkZ, padding));
     }
 
     public static void clearWorld(@NotNull TerraformWorld tw) {
-        CHUNKS.keySet().removeIf(key -> key.tw().getName().equals(tw.getName()));
-        MAPS.keySet().removeIf(key -> key.tw().getName().equals(tw.getName()));
+        WORLD_CACHES.remove(tw);
+    }
+
+    private static @NotNull SurfaceCaches getWorldCaches(@NotNull TerraformWorld tw) {
+        return WORLD_CACHES.computeIfAbsent(tw, ignored -> createWorldCaches(tw));
+    }
+
+    private static @NotNull SurfaceCaches createWorldCaches(@NotNull TerraformWorld tw) {
+        int chunkCacheSize = Math.max(256, TConfig.c.DEVSTUFF_CHUNKCACHE_SIZE);
+        int mapCacheSize = Math.max(64, chunkCacheSize / 8);
+        return new SurfaceCaches(
+                new ConcurrentLRUCache<>(
+                        "baseSurfaceChunkCache[" + tw.getName() + "]",
+                        chunkCacheSize,
+                        key -> buildBaseSurfaceChunk(tw, key.chunkX(), key.chunkZ())
+                ),
+                new ConcurrentLRUCache<>(
+                        "baseSurfaceMapCache[" + tw.getName() + "]",
+                        mapCacheSize,
+                        key -> buildBaseSurfaceMap(tw, key.chunkX(), key.chunkZ(), key.padding())
+                )
+        );
     }
 
     private static @NotNull BaseSurfaceMap buildBaseSurfaceMap(@NotNull TerraformWorld tw,
@@ -71,24 +101,37 @@ public final class BaseSurfaceMapStoreV3 {
     }
 
     private static @NotNull BaseSurfaceChunkV3 buildBaseSurfaceChunk(@NotNull TerraformWorld tw, int chunkX, int chunkZ) {
-        ChunkCache cache = new ChunkCache(tw, chunkX, chunkZ);
-        short[] rawTerrainHeights = new short[256];
-        seedRawTerrainHeights(tw, chunkX, chunkZ, cache, rawTerrainHeights);
-        SurfaceCaptureChunkData capture = new SurfaceCaptureChunkData(tw, chunkX, chunkZ, rawTerrainHeights);
-        applyChunkTerrainTransforms(tw, chunkX, chunkZ, rawTerrainHeights, cache, capture);
-
-        BaseSurfaceColumn[] columns = new BaseSurfaceColumn[256];
-        for (int localX = 0; localX < 16; localX++) {
-            for (int localZ = 0; localZ < 16; localZ++) {
-                int index = index(localX, localZ);
-                int baseSurfaceY = cache.getTransformedHeight(localX, localZ);
-                Material aboveSurface = capture.getType(localX, baseSurfaceY + 1, localZ);
-                SurfaceTopState topState = classifyTopState(aboveSurface);
-                SurfaceSafety safety = topState == SurfaceTopState.WATER_EXPOSED ? SurfaceSafety.WET : SurfaceSafety.DRY;
-                columns[index] = new BaseSurfaceColumn((short) baseSurfaceY, safety, topState);
+        try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start("cave-v3.surface-chunk.build")) {
+            ChunkCache cache = new ChunkCache(tw, chunkX, chunkZ);
+            short[] rawTerrainHeights = new short[256];
+            try (CaveV3Profiler.Scope inner = CaveV3Profiler.start("cave-v3.surface-chunk.seed-heights")) {
+                seedRawTerrainHeights(tw, chunkX, chunkZ, cache, rawTerrainHeights);
             }
+            SurfaceCaptureChunkData capture = new SurfaceCaptureChunkData(tw, chunkX, chunkZ, rawTerrainHeights);
+            try (CaveV3Profiler.Scope inner = CaveV3Profiler.start("cave-v3.surface-chunk.apply-transforms")) {
+                applyChunkTerrainTransforms(tw, chunkX, chunkZ, rawTerrainHeights, cache, capture);
+            }
+
+            BaseSurfaceColumn[] columns = new BaseSurfaceColumn[256];
+            try (CaveV3Profiler.Scope inner = CaveV3Profiler.start("cave-v3.surface-chunk.classify-columns")) {
+                for (int localX = 0; localX < 16; localX++) {
+                    for (int localZ = 0; localZ < 16; localZ++) {
+                        int index = index(localX, localZ);
+                        int baseSurfaceY = cache.getTransformedHeight(localX, localZ);
+                        Material aboveSurface = capture.getType(localX, baseSurfaceY + 1, localZ);
+                        SurfaceTopState topState = classifyTopState(aboveSurface);
+                        SurfaceSafety safety = topState == SurfaceTopState.WATER_EXPOSED ? SurfaceSafety.WET : SurfaceSafety.DRY;
+                        columns[index] = new BaseSurfaceColumn((short) baseSurfaceY, safety, topState);
+                    }
+                }
+            }
+
+            BaseSurfaceChunkV3.SurfaceBlockWrite[][] surfaceWritesByColumn;
+            try (CaveV3Profiler.Scope inner = CaveV3Profiler.start("cave-v3.surface-chunk.pack-writes")) {
+                surfaceWritesByColumn = capture.toSurfaceWritesByColumn();
+            }
+            return new BaseSurfaceChunkV3(rawTerrainHeights, columns, surfaceWritesByColumn);
         }
-        return new BaseSurfaceChunkV3(rawTerrainHeights, columns, capture.toSurfaceWritesByColumn());
     }
 
     private static void seedRawTerrainHeights(@NotNull TerraformWorld tw,
@@ -144,10 +187,14 @@ public final class BaseSurfaceMapStoreV3 {
         return localX + (localZ << 4);
     }
 
-    private record BaseSurfaceChunkKey(@NotNull TerraformWorld tw, int chunkX, int chunkZ) {
+    private record SurfaceCaches(@NotNull ConcurrentLRUCache<LocalChunkKey, BaseSurfaceChunkV3> chunks,
+                                 @NotNull ConcurrentLRUCache<LocalMapKey, BaseSurfaceMap> maps) {
     }
 
-    private record BaseSurfaceMapKey(@NotNull TerraformWorld tw, int chunkX, int chunkZ, int padding) {
+    private record LocalChunkKey(int chunkX, int chunkZ) {
+    }
+
+    private record LocalMapKey(int chunkX, int chunkZ, int padding) {
     }
 
     private static final class SurfaceCaptureChunkData implements ChunkGenerator.ChunkData {
@@ -306,33 +353,35 @@ public final class BaseSurfaceMapStoreV3 {
         }
 
         private BaseSurfaceChunkV3.SurfaceBlockWrite[] @NotNull [] toSurfaceWritesByColumn() {
-            @SuppressWarnings("unchecked")
-            ArrayList<BaseSurfaceChunkV3.SurfaceBlockWrite>[] writesByColumn = new ArrayList[256];
-            for (Map.Entry<Integer, Material> entry : blockOverrides.entrySet()) {
-                int packed = entry.getKey();
-                int localX = packed & 0xF;
-                int localZ = (packed >> 4) & 0xF;
-                int columnIndex = index(localX, localZ);
-                ArrayList<BaseSurfaceChunkV3.SurfaceBlockWrite> columnWrites = writesByColumn[columnIndex];
-                if (columnWrites == null) {
-                    columnWrites = new ArrayList<>();
-                    writesByColumn[columnIndex] = columnWrites;
+            try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start("cave-v3.surface-chunk.collect-writes")) {
+                @SuppressWarnings("unchecked")
+                ArrayList<BaseSurfaceChunkV3.SurfaceBlockWrite>[] writesByColumn = new ArrayList[256];
+                for (Map.Entry<Integer, Material> entry : blockOverrides.entrySet()) {
+                    int packed = entry.getKey();
+                    int localX = packed & 0xF;
+                    int localZ = (packed >> 4) & 0xF;
+                    int columnIndex = index(localX, localZ);
+                    ArrayList<BaseSurfaceChunkV3.SurfaceBlockWrite> columnWrites = writesByColumn[columnIndex];
+                    if (columnWrites == null) {
+                        columnWrites = new ArrayList<>();
+                        writesByColumn[columnIndex] = columnWrites;
+                    }
+                    columnWrites.add(new BaseSurfaceChunkV3.SurfaceBlockWrite(
+                            packed & 0xF,
+                            decodeY(packed),
+                            (packed >> 4) & 0xF,
+                            entry.getValue()
+                    ));
                 }
-                columnWrites.add(new BaseSurfaceChunkV3.SurfaceBlockWrite(
-                        packed & 0xF,
-                        decodeY(packed),
-                        (packed >> 4) & 0xF,
-                        entry.getValue()
-                ));
+                BaseSurfaceChunkV3.SurfaceBlockWrite[][] result = new BaseSurfaceChunkV3.SurfaceBlockWrite[256][];
+                for (int columnIndex = 0; columnIndex < result.length; columnIndex++) {
+                    ArrayList<BaseSurfaceChunkV3.SurfaceBlockWrite> columnWrites = writesByColumn[columnIndex];
+                    result[columnIndex] = columnWrites == null
+                                          ? BaseSurfaceChunkV3.NO_WRITES
+                                          : columnWrites.toArray(new BaseSurfaceChunkV3.SurfaceBlockWrite[0]);
+                }
+                return result;
             }
-            BaseSurfaceChunkV3.SurfaceBlockWrite[][] result = new BaseSurfaceChunkV3.SurfaceBlockWrite[256][];
-            for (int columnIndex = 0; columnIndex < result.length; columnIndex++) {
-                ArrayList<BaseSurfaceChunkV3.SurfaceBlockWrite> columnWrites = writesByColumn[columnIndex];
-                result[columnIndex] = columnWrites == null
-                                      ? BaseSurfaceChunkV3.NO_WRITES
-                                      : columnWrites.toArray(new BaseSurfaceChunkV3.SurfaceBlockWrite[0]);
-            }
-            return result;
         }
 
         private boolean isInsideChunk(int x, int z) {

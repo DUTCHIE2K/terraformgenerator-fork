@@ -10,6 +10,7 @@ import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
 import org.terraform.biome.BiomeHandler;
 import org.terraform.cave.v3.BaseSurfaceChunkV3;
+import org.terraform.cave.v3.CaveV3Profiler;
 import org.terraform.biome.cavepopulators.MasterCavePopulatorDistributor;
 import org.terraform.cave.v3.BaseSurfaceMap;
 import org.terraform.cave.v3.BaseSurfaceMapStoreV3;
@@ -70,36 +71,41 @@ public class TerraformGenerator extends ChunkGenerator {
     // This method ONLY fills transformedHeight with meaningful values,
     // and writes nothing.
     public static void buildFilledCache(@NotNull TerraformWorld tw, int chunkX, int chunkZ, @NotNull ChunkCache cache) {
+        CompositeCaveGeneratorMode caveMode = CompositeCaveGeneratorMode.fromConfig(TConfig.c.CAVES_GENERATOR_MODE);
         if (cache.areTransformedHeightsFilled()) {
+            if (caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3) {
+                CaveV3Profiler.recordEvent("cave-v3.build-filled-cache.skip-already-filled");
+            }
             return;
         }
 
         // TerraformGeneratorPlugin.watchdogSuppressant.tickWatchdog(); don't unnecessarily tick this shit
 
-        CompositeCaveGeneratorMode caveMode = CompositeCaveGeneratorMode.fromConfig(TConfig.c.CAVES_GENERATOR_MODE);
         if (caveMode == CompositeCaveGeneratorMode.COMPOSITE_V3) {
-            boolean cavesEnabled = TConfig.areCavesEnabled();
-            BaseSurfaceChunkV3 surfaceChunk = BaseSurfaceMapStoreV3.getBaseSurfaceChunk(tw, chunkX, chunkZ);
-            CompositeCaveSampler compositeSampler = cavesEnabled ? createCompositeV3Sampler(tw) : null;
-            for (int x = 0; x < 16; x++) {
-                for (int z = 0; z < 16; z++) {
-                    int rawX = chunkX * 16 + x;
-                    int rawZ = chunkZ * 16 + z;
-                    int baseSurfaceY = surfaceChunk.getBaseSurfaceY(x, z);
-                    cache.writeTransformedHeight(x, z, (short) baseSurfaceY);
-                    if (cavesEnabled) {
-                        for (int y = baseSurfaceY; y >= TerraformGeneratorPlugin.injector.getMinY(); y--) {
-                            if (compositeSampler.canCarve(rawX, y, rawZ, baseSurfaceY, cache)) {
-                                cache.writeTransformedHeight(x, z, (short) (y - 1));
-                            }
-                            else {
-                                break;
+            try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start("cave-v3.build-filled-cache")) {
+                boolean cavesEnabled = TConfig.areCavesEnabled();
+                BaseSurfaceChunkV3 surfaceChunk = BaseSurfaceMapStoreV3.getBaseSurfaceChunk(tw, chunkX, chunkZ);
+                CompositeCaveSampler compositeSampler = cavesEnabled ? createCompositeV3Sampler(tw) : null;
+                for (int x = 0; x < 16; x++) {
+                    for (int z = 0; z < 16; z++) {
+                        int rawX = chunkX * 16 + x;
+                        int rawZ = chunkZ * 16 + z;
+                        int baseSurfaceY = surfaceChunk.getBaseSurfaceY(x, z);
+                        cache.writeTransformedHeight(x, z, (short) baseSurfaceY);
+                        if (cavesEnabled) {
+                            for (int y = baseSurfaceY; y >= TerraformGeneratorPlugin.injector.getMinY(); y--) {
+                                if (compositeSampler.canCarve(rawX, y, rawZ, baseSurfaceY, cache)) {
+                                    cache.writeTransformedHeight(x, z, (short) (y - 1));
+                                }
+                                else {
+                                    break;
+                                }
                             }
                         }
                     }
                 }
+                cache.markTransformedHeightsFilled();
             }
-            cache.markTransformedHeightsFilled();
             return;
         }
 
@@ -330,105 +336,110 @@ public class TerraformGenerator extends ChunkGenerator {
                                           int chunkZ,
                                           @NotNull ChunkData chunkData)
     {
-        CaveSnapshotV3Builder caveBuilderV3 = new CaveSnapshotV3Builder(chunkX, chunkZ);
-        @SuppressWarnings("unchecked")
-        List<CarvedInterval>[] caveIntervalsByColumn = new List[256];
-        BaseSurfaceChunkV3 surfaceChunk = BaseSurfaceMapStoreV3.getBaseSurfaceChunk(tw, chunkX, chunkZ);
-        boolean cavesEnabled = TConfig.areCavesEnabled();
-        boolean usePrecomputedTopSolidHints = cavesEnabled && cache.areTransformedHeightsFilled();
-        CompositeCaveSampler compositeSampler = cavesEnabled ? createCompositeV3Sampler(tw) : null;
+        try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start("cave-v3.generate-noise")) {
+            CaveSnapshotV3Builder caveBuilderV3 = new CaveSnapshotV3Builder(chunkX, chunkZ);
+            @SuppressWarnings("unchecked")
+            List<CarvedInterval>[] caveIntervalsByColumn = new List[256];
+            BaseSurfaceChunkV3 surfaceChunk = BaseSurfaceMapStoreV3.getBaseSurfaceChunk(tw, chunkX, chunkZ);
+            boolean cavesEnabled = TConfig.areCavesEnabled();
+            boolean usePrecomputedTopSolidHints = cavesEnabled && cache.areTransformedHeightsFilled();
+            CaveV3Profiler.recordEvent(usePrecomputedTopSolidHints
+                                       ? "cave-v3.generate-noise.prefilled-top-solid-hit"
+                                       : "cave-v3.generate-noise.prefilled-top-solid-miss");
+            CompositeCaveSampler compositeSampler = cavesEnabled ? createCompositeV3Sampler(tw) : null;
 
-        for (int x = 0; x < 16; x++) {
-            for (int z = 0; z < 16; z++) {
-                int rawX = (chunkX << 4) + x;
-                int rawZ = (chunkZ << 4) + z;
-                int columnIndex = getColumnIndex(x, z);
-                int rawTerrainHeight = surfaceChunk.getRawTerrainHeight(x, z);
-                int baseSurfaceY = surfaceChunk.getBaseSurfaceY(x, z);
-                int precomputedTopSolidY = usePrecomputedTopSolidHints ? cache.getTransformedHeight(x, z) : baseSurfaceY;
-                if (!usePrecomputedTopSolidHints) {
-                    cache.writeTransformedHeight(x, z, (short) baseSurfaceY);
-                }
-
-                chunkData.setRegion(x, 3, z, x + 1, rawTerrainHeight + 1, z + 1, CommonMat.STONE);
-                chunkData.setRegion(x,
-                        TerraformGeneratorPlugin.injector.getMinY(),
-                        z,
-                        x + 1,
-                        0,
-                        z + 1,
-                        CommonMat.DEEPSLATE
-                );
-
-                BiomeBank bank = tw.getBiomeBank(rawX, rawTerrainHeight, rawZ);
-                int crustIndex = 0;
-                Material[] crust = bank.getHandler().getSurfaceCrust(dontCareRandom);
-                while (crustIndex < crust.length) {
-                    chunkData.setBlock(x, rawTerrainHeight - crustIndex, z, crust[crustIndex]);
-                    crustIndex++;
-                }
-                chunkData.setRegion(x, rawTerrainHeight + 1, z, x + 1, seaLevel + 1, z + 1, CommonMat.WATER);
-                surfaceChunk.replaySurfaceWrites(chunkData, x, z);
-
-                caveIntervalsByColumn[columnIndex] = carveDensityFieldColumn(
-                        compositeSampler,
-                        cavesEnabled,
-                        cache,
-                        chunkData,
-                        dontCareRandom,
-                        x,
-                        z,
-                        rawX,
-                        rawZ,
-                        baseSurfaceY,
-                        usePrecomputedTopSolidHints,
-                        precomputedTopSolidY
-                );
-
-                for (int i = 1; i < TConfig.c.HEIGHT_MAP_BEDROCK_HEIGHT; i++) {
-                    if (GenUtils.chance(dontCareRandom, TConfig.c.HEIGHT_MAP_BEDROCK_DENSITY, 100)) {
-                        chunkData.setBlock(x, TerraformGeneratorPlugin.injector.getMinY() + i, z, CommonMat.BEDROCK);
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    int rawX = (chunkX << 4) + x;
+                    int rawZ = (chunkZ << 4) + z;
+                    int columnIndex = getColumnIndex(x, z);
+                    int rawTerrainHeight = surfaceChunk.getRawTerrainHeight(x, z);
+                    int baseSurfaceY = surfaceChunk.getBaseSurfaceY(x, z);
+                    int precomputedTopSolidY = usePrecomputedTopSolidHints ? cache.getTransformedHeight(x, z) : baseSurfaceY;
+                    if (!usePrecomputedTopSolidHints) {
+                        cache.writeTransformedHeight(x, z, (short) baseSurfaceY);
                     }
-                    else {
-                        break;
+
+                    chunkData.setRegion(x, 3, z, x + 1, rawTerrainHeight + 1, z + 1, CommonMat.STONE);
+                    chunkData.setRegion(x,
+                            TerraformGeneratorPlugin.injector.getMinY(),
+                            z,
+                            x + 1,
+                            0,
+                            z + 1,
+                            CommonMat.DEEPSLATE
+                    );
+
+                    BiomeBank bank = tw.getBiomeBank(rawX, rawTerrainHeight, rawZ);
+                    int crustIndex = 0;
+                    Material[] crust = bank.getHandler().getSurfaceCrust(dontCareRandom);
+                    while (crustIndex < crust.length) {
+                        chunkData.setBlock(x, rawTerrainHeight - crustIndex, z, crust[crustIndex]);
+                        crustIndex++;
+                    }
+                    chunkData.setRegion(x, rawTerrainHeight + 1, z, x + 1, seaLevel + 1, z + 1, CommonMat.WATER);
+                    surfaceChunk.replaySurfaceWrites(chunkData, x, z);
+
+                    caveIntervalsByColumn[columnIndex] = carveDensityFieldColumn(
+                            compositeSampler,
+                            cavesEnabled,
+                            cache,
+                            chunkData,
+                            dontCareRandom,
+                            x,
+                            z,
+                            rawX,
+                            rawZ,
+                            baseSurfaceY,
+                            usePrecomputedTopSolidHints,
+                            precomputedTopSolidY
+                    );
+
+                    for (int i = 1; i < TConfig.c.HEIGHT_MAP_BEDROCK_HEIGHT; i++) {
+                        if (GenUtils.chance(dontCareRandom, TConfig.c.HEIGHT_MAP_BEDROCK_DENSITY, 100)) {
+                            chunkData.setBlock(x, TerraformGeneratorPlugin.injector.getMinY() + i, z, CommonMat.BEDROCK);
+                        }
+                        else {
+                            break;
+                        }
                     }
                 }
             }
-        }
 
-        chunkData.setRegion(0,
-                TerraformGeneratorPlugin.injector.getMinY(),
-                0,
-                16,
-                TerraformGeneratorPlugin.injector.getMinY() + 1,
-                16,
-                CommonMat.BEDROCK
-        );
-        for (int x = 0; x < 16; x++) {
-            for (int z = 0; z < 16; z++) {
-                int columnIndex = getColumnIndex(x, z);
-                caveBuilderV3.recordColumn(
-                        x,
-                        z,
-                        surfaceChunk.getBaseSurfaceY(x, z),
-                        cache.getTransformedHeight(x, z),
-                        toV3Intervals(
-                                CompositeCaveGeneratorMode.COMPOSITE_V3,
-                                compositeSampler,
-                                cache,
-                                x,
-                                z,
-                                (chunkX << 4) + x,
-                                (chunkZ << 4) + z,
-                                surfaceChunk.getBaseSurfaceY(x, z),
-                                caveIntervalsByColumn[columnIndex]
-                        )
-                );
+            chunkData.setRegion(0,
+                    TerraformGeneratorPlugin.injector.getMinY(),
+                    0,
+                    16,
+                    TerraformGeneratorPlugin.injector.getMinY() + 1,
+                    16,
+                    CommonMat.BEDROCK
+            );
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    int columnIndex = getColumnIndex(x, z);
+                    caveBuilderV3.recordColumn(
+                            x,
+                            z,
+                            surfaceChunk.getBaseSurfaceY(x, z),
+                            cache.getTransformedHeight(x, z),
+                            toV3Intervals(
+                                    CompositeCaveGeneratorMode.COMPOSITE_V3,
+                                    compositeSampler,
+                                    cache,
+                                    x,
+                                    z,
+                                    (chunkX << 4) + x,
+                                    (chunkZ << 4) + z,
+                                    surfaceChunk.getBaseSurfaceY(x, z),
+                                    caveIntervalsByColumn[columnIndex]
+                            )
+                    );
+                }
             }
+            cache.markTransformedHeightsFilled();
+            CaveSnapshotV3 snapshotV3 = caveBuilderV3.build();
+            CaveSnapshotStoreV3.publishGameplay(tw, chunkX, chunkZ, snapshotV3);
         }
-        cache.markTransformedHeightsFilled();
-        CaveSnapshotV3 snapshotV3 = caveBuilderV3.build();
-        CaveSnapshotStoreV3.publishGameplay(tw, chunkX, chunkZ, snapshotV3);
     }
 
     private static boolean isInsideChunk(int localX, int localZ) {
@@ -501,83 +512,85 @@ public class TerraformGenerator extends ChunkGenerator {
                                                                          boolean usePrecomputedTopSolidHint,
                                                                          int precomputedTopSolidY)
     {
-        final int minY = TerraformGeneratorPlugin.injector.getMinY();
-        final int invalHeight = minY - 1;
-        int firstCaveAir = invalHeight;
-        boolean surfaceResolved = false;
-        boolean mustUpdateHeight = true;
-        List<CoordPair> rawPairs = new ArrayList<>();
-        int y = (int) surfaceHeight;
+        try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start("cave-v3.carve-column")) {
+            final int minY = TerraformGeneratorPlugin.injector.getMinY();
+            final int invalHeight = minY - 1;
+            int firstCaveAir = invalHeight;
+            boolean surfaceResolved = false;
+            boolean mustUpdateHeight = true;
+            List<CoordPair> rawPairs = new ArrayList<>();
+            int y = (int) surfaceHeight;
 
-        if (usePrecomputedTopSolidHint) {
-            int hintedTopSolidY = Math.min(y, precomputedTopSolidY);
-            if (hintedTopSolidY < minY) {
-                for (int carveY = y; carveY >= minY; carveY--) {
+            if (usePrecomputedTopSolidHint) {
+                int hintedTopSolidY = Math.min(y, precomputedTopSolidY);
+                if (hintedTopSolidY < minY) {
+                    for (int carveY = y; carveY >= minY; carveY--) {
+                        chunkData.setBlock(localX, carveY, localZ, CommonMat.CAVE_AIR);
+                        cache.cacheNonSolid(localX, carveY, localZ);
+                    }
+                    return Collections.emptyList();
+                }
+
+                for (int carveY = y; carveY > hintedTopSolidY; carveY--) {
                     chunkData.setBlock(localX, carveY, localZ, CommonMat.CAVE_AIR);
                     cache.cacheNonSolid(localX, carveY, localZ);
                 }
-                return Collections.emptyList();
-            }
 
-            for (int carveY = y; carveY > hintedTopSolidY; carveY--) {
-                chunkData.setBlock(localX, carveY, localZ, CommonMat.CAVE_AIR);
-                cache.cacheNonSolid(localX, carveY, localZ);
-            }
-
-            if (hintedTopSolidY >= 0 && hintedTopSolidY <= 2) {
-                chunkData.setBlock(localX, hintedTopSolidY, localZ, GenUtils.randChoice(
-                        dontCareRandom,
-                        CommonMat.DEEPSLATE,
-                        CommonMat.STONE
-                ));
-            }
-            cache.cacheSolid(localX, hintedTopSolidY, localZ);
-            surfaceResolved = true;
-            mustUpdateHeight = false;
-            y = hintedTopSolidY - 1;
-        }
-
-        for (; y >= minY; y--) {
-            if (y >= 0 && y <= 2) {
-                chunkData.setBlock(localX, y, localZ, GenUtils.randChoice(
-                        dontCareRandom,
-                        CommonMat.DEEPSLATE,
-                        CommonMat.STONE
-                ));
-            }
-
-            boolean isCarved = false;
-            if (cavesEnabled) {
-                isCarved = compositeSampler.canCarve(rawX, y, rawZ, surfaceHeight, cache);
-            }
-            if (isCarved) {
-                chunkData.setBlock(localX, y, localZ, CommonMat.CAVE_AIR);
-                cache.cacheNonSolid(localX, y, localZ);
-                if (y > minY && mustUpdateHeight) {
-                    cache.writeTransformedHeight(localX, localZ, (short) (y - 1));
+                if (hintedTopSolidY >= 0 && hintedTopSolidY <= 2) {
+                    chunkData.setBlock(localX, hintedTopSolidY, localZ, GenUtils.randChoice(
+                            dontCareRandom,
+                            CommonMat.DEEPSLATE,
+                            CommonMat.STONE
+                    ));
                 }
-                if (y > minY && surfaceResolved && firstCaveAir == invalHeight) {
-                    firstCaveAir = y;
-                }
+                cache.cacheSolid(localX, hintedTopSolidY, localZ);
+                surfaceResolved = true;
+                mustUpdateHeight = false;
+                y = hintedTopSolidY - 1;
             }
-            else {
-                cache.cacheSolid(localX, y, localZ);
-                if (y > minY) {
-                    mustUpdateHeight = false;
-                    if (surfaceResolved) {
-                        if (firstCaveAir != invalHeight) {
-                            rawPairs.add(new CoordPair(firstCaveAir, y));
-                            firstCaveAir = invalHeight;
+
+            for (; y >= minY; y--) {
+                if (y >= 0 && y <= 2) {
+                    chunkData.setBlock(localX, y, localZ, GenUtils.randChoice(
+                            dontCareRandom,
+                            CommonMat.DEEPSLATE,
+                            CommonMat.STONE
+                    ));
+                }
+
+                boolean isCarved = false;
+                if (cavesEnabled) {
+                    isCarved = compositeSampler.canCarve(rawX, y, rawZ, surfaceHeight, cache);
+                }
+                if (isCarved) {
+                    chunkData.setBlock(localX, y, localZ, CommonMat.CAVE_AIR);
+                    cache.cacheNonSolid(localX, y, localZ);
+                    if (y > minY && mustUpdateHeight) {
+                        cache.writeTransformedHeight(localX, localZ, (short) (y - 1));
+                    }
+                    if (y > minY && surfaceResolved && firstCaveAir == invalHeight) {
+                        firstCaveAir = y;
+                    }
+                }
+                else {
+                    cache.cacheSolid(localX, y, localZ);
+                    if (y > minY) {
+                        mustUpdateHeight = false;
+                        if (surfaceResolved) {
+                            if (firstCaveAir != invalHeight) {
+                                rawPairs.add(new CoordPair(firstCaveAir, y));
+                                firstCaveAir = invalHeight;
+                            }
+                        }
+                        else {
+                            surfaceResolved = true;
                         }
                     }
-                    else {
-                        surfaceResolved = true;
-                    }
                 }
             }
-        }
 
-        return toCaveIntervals(rawPairs);
+            return toCaveIntervals(rawPairs);
+        }
     }
 
     private static @NotNull List<CaveIntervalV3> toV3Intervals(@NotNull CompositeCaveGeneratorMode caveMode,

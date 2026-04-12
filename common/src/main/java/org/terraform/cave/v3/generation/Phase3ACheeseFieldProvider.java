@@ -9,10 +9,10 @@ import org.terraform.utils.noise.NoiseCacheHandler;
 public final class Phase3ACheeseFieldProvider implements CaveFieldProvider {
     private static final float WARP_SCALE = 0.58f;
     private static final float WARP_VERTICAL_SCALE = 0.30f;
-    private static final float WARP_HORIZONTAL_AMPLITUDE = 11.5f;
-    private static final float WARP_VERTICAL_AMPLITUDE = 4.25f;
-    private static final float CHAMBER_HORIZONTAL_STRETCH = 0.52f;
-    private static final float CHAMBER_VERTICAL_STRETCH = 0.62f;
+    private static final float WARP_HORIZONTAL_AMPLITUDE = 4.5f;
+    private static final float WARP_VERTICAL_AMPLITUDE = 7.25f;
+    private static final float CHAMBER_HORIZONTAL_STRETCH = 0.4f;
+    private static final float CHAMBER_VERTICAL_STRETCH = 0.68f;
     private static final float MIN_FULL_CARVE_DEPTH = 6f;
     private static final float SURFACE_FADE_DEPTH = 14f;
     private static final float DEEP_BOOST_START = 18f;
