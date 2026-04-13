@@ -7,18 +7,18 @@ import org.terraform.utils.noise.FastNoise;
 import org.terraform.utils.noise.NoiseCacheHandler;
 
 public final class Phase3ACheeseFieldProvider implements CaveFieldProvider {
-    private static final float WARP_SCALE = 0.45f;
-    private static final float WARP_VERTICAL_SCALE = 0.23f;
-    private static final float WARP_HORIZONTAL_AMPLITUDE = 7.25f;
-    private static final float WARP_VERTICAL_AMPLITUDE = 4.25f;
-    private static final float CHAMBER_HORIZONTAL_STRETCH = 0.35f;
-    private static final float CHAMBER_VERTICAL_STRETCH = 0.72f;
-    private static final float MIN_FULL_CARVE_DEPTH = 6f;
-    private static final float SURFACE_FADE_DEPTH = 14f;
+    private static final float WARP_SCALE = 0.7f;
+    private static final float WARP_VERTICAL_SCALE = 0.7f;
+    private static final float WARP_HORIZONTAL_AMPLITUDE = 7f;
+    private static final float WARP_VERTICAL_AMPLITUDE = 3.25f;
+    private static final float CHAMBER_HORIZONTAL_STRETCH = 0.28f;
+    private static final float CHAMBER_VERTICAL_STRETCH = 0.41f;
+    private static final float MIN_FULL_CARVE_DEPTH = 2f;
+    private static final float SURFACE_FADE_DEPTH = 8f;
     private static final float DEEP_BOOST_START = 18f;
     private static final float DEEP_BOOST_RANGE = 28f;
     private static final float BASE_DENSITY_OFFSET = -0.05f;
-    private static final float CHAMBER_WEIGHT = 0.485f;
+    private static final float CHAMBER_WEIGHT = 0.5f;
 
     @Override
     public @NotNull CaveFieldSampler createSampler(@NotNull TerraformWorld tw) {
@@ -29,7 +29,7 @@ public final class Phase3ACheeseFieldProvider implements CaveFieldProvider {
                 world -> {
                     FastNoise n = new FastNoise((int) (world.getSeed() * 67L + 0x14D51));
                     n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
-                    n.SetFrequency(baseFrequency * 0.6f);
+                    n.SetFrequency(baseFrequency * 0.53f);
                     n.SetFractalOctaves(2);
                     return n;
                 }
@@ -40,7 +40,7 @@ public final class Phase3ACheeseFieldProvider implements CaveFieldProvider {
                 world -> {
                     FastNoise n = new FastNoise((int) (world.getSeed() * 79L + 0x2C771));
                     n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
-                    n.SetFrequency(baseFrequency * 0.72f);
+                    n.SetFrequency(baseFrequency * 0.68f);
                     n.SetFractalOctaves(3);
                     return n;
                 }
@@ -82,7 +82,7 @@ public final class Phase3ACheeseFieldProvider implements CaveFieldProvider {
         float deepBoost = DensityCarveRules.clamp01((depthBelowSurface - DEEP_BOOST_START) / DEEP_BOOST_RANGE);
 
         float density = BASE_DENSITY_OFFSET + (chamber * CHAMBER_WEIGHT);
-        density *= 0.55f + (nearSurfaceFade * 0.45f);
+        density *= 0.75f + (nearSurfaceFade * 0.25f);
         density += deepBoost * 0.08f;
         return density;
     }

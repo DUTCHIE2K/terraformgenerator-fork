@@ -10,11 +10,11 @@ public final class DensityCompositeCaveSampler implements CompositeCaveSampler {
     private static final float SOFT_THRESHOLD_BONUS = 0.08f;
 
     private final @NotNull TerraformWorld tw;
-    private final @NotNull CaveFieldSampler cheeseDensitySampler;
+    private final @NotNull CaveFieldSampler[] fieldSamplers;
 
-    public DensityCompositeCaveSampler(@NotNull TerraformWorld tw, @NotNull CaveFieldSampler cheeseDensitySampler) {
+    public DensityCompositeCaveSampler(@NotNull TerraformWorld tw, @NotNull CaveFieldSampler... fieldSamplers) {
         this.tw = tw;
-        this.cheeseDensitySampler = cheeseDensitySampler;
+        this.fieldSamplers = fieldSamplers.clone();
     }
 
     @Override
@@ -55,15 +55,23 @@ public final class DensityCompositeCaveSampler implements CompositeCaveSampler {
             return false;
         }
 
-        float rawCheese = cheeseDensitySampler.sampleDensity(rawX, y, rawZ, baseSurfaceHeight);
-        float cheeseLocalScore = getCheeseLocalScore(rawCheese);
-        if (cheeseLocalScore <= NEGATIVE_INFINITY_SCORE / 2f) {
+        float bestLocalScore = getBestLocalScore(rawX, y, rawZ, baseSurfaceHeight);
+        if (bestLocalScore <= NEGATIVE_INFINITY_SCORE / 2f) {
             return false;
         }
-        return cheeseLocalScore - columnContext.getGlobalPenalty(y) >= 0f;
+        return bestLocalScore - columnContext.getGlobalPenalty(y) >= 0f;
     }
 
-    private float getCheeseLocalScore(float baseDensity) {
+    private float getBestLocalScore(int rawX, int y, int rawZ, double baseSurfaceHeight) {
+        float bestLocalScore = NEGATIVE_INFINITY_SCORE;
+        for (CaveFieldSampler fieldSampler : fieldSamplers) {
+            float fieldDensity = fieldSampler.sampleDensity(rawX, y, rawZ, baseSurfaceHeight);
+            bestLocalScore = Math.max(bestLocalScore, getFieldLocalScore(fieldDensity));
+        }
+        return bestLocalScore;
+    }
+
+    private float getFieldLocalScore(float baseDensity) {
         float score = baseDensity - DensityCarveRules.getBaseThreshold();
 
         // Soft threshold band (edge smoothing)

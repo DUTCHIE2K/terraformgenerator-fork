@@ -9,6 +9,7 @@ import org.terraform.cave.v3.generation.CaveFieldSampler;
 import org.terraform.cave.v3.generation.CompositeCaveSampler;
 import org.terraform.cave.v3.generation.DensityCompositeCaveSampler;
 import org.terraform.cave.v3.generation.Phase3ACheeseFieldProvider;
+import org.terraform.cave.v3.generation.Phase3BTunnelFieldProvider;
 import org.terraform.coregen.ChunkCache;
 import org.terraform.coregen.HeightMap;
 import org.terraform.coregen.bukkit.TerraformBukkitBlockPopulator;
@@ -130,8 +131,9 @@ public class TerraformWorld {
         synchronized (this) {
             sampler = compositeV3CaveSampler;
             if (sampler == null) {
-                CaveFieldSampler densitySampler = new Phase3ACheeseFieldProvider().createSampler(this);
-                sampler = new DensityCompositeCaveSampler(this, densitySampler);
+                CaveFieldSampler cheeseSampler = new Phase3ACheeseFieldProvider().createSampler(this);
+                CaveFieldSampler tunnelSampler = new Phase3BTunnelFieldProvider().createSampler(this);
+                sampler = new DensityCompositeCaveSampler(this, cheeseSampler, tunnelSampler);
                 compositeV3CaveSampler = sampler;
             }
         }
