@@ -20,6 +20,7 @@ import org.terraform.cave.v3.CaveSnapshotStoreV3;
 import org.terraform.cave.v3.CaveSnapshotV3;
 import org.terraform.cave.v3.CaveSnapshotV3Builder;
 import org.terraform.cave.v3.SurfaceConnectivity;
+import org.terraform.cave.v3.generation.CompositeCaveColumnSampler;
 import org.terraform.cave.v3.generation.CompositeCaveSampler;
 import org.terraform.cave.v3.generation.CompositeCaveGeneratorMode;
 import org.terraform.coregen.ChunkCache;
@@ -91,10 +92,18 @@ public class TerraformGenerator extends ChunkGenerator {
                         int rawX = chunkX * 16 + x;
                         int rawZ = chunkZ * 16 + z;
                         int baseSurfaceY = surfaceChunk.getBaseSurfaceY(x, z);
+                        CompositeCaveColumnSampler columnSampler = cavesEnabled
+                                                                  ? compositeSampler.createColumnSampler(
+                                                                          rawX,
+                                                                          rawZ,
+                                                                          baseSurfaceY,
+                                                                          cache
+                                                                  )
+                                                                  : null;
                         cache.writeTransformedHeight(x, z, (short) baseSurfaceY);
                         if (cavesEnabled) {
                             for (int y = baseSurfaceY; y >= TerraformGeneratorPlugin.injector.getMinY(); y--) {
-                                if (compositeSampler.canCarve(rawX, y, rawZ, baseSurfaceY, cache)) {
+                                if (columnSampler.canCarve(y)) {
                                     cache.writeTransformedHeight(x, z, (short) (y - 1));
                                 }
                                 else {
@@ -549,6 +558,14 @@ public class TerraformGenerator extends ChunkGenerator {
                 y = hintedTopSolidY - 1;
             }
 
+            CompositeCaveColumnSampler columnSampler = cavesEnabled
+                                                      ? compositeSampler.createColumnSampler(
+                                                              rawX,
+                                                              rawZ,
+                                                              surfaceHeight,
+                                                              cache
+                                                      )
+                                                      : null;
             for (; y >= minY; y--) {
                 if (y >= 0 && y <= 2) {
                     chunkData.setBlock(localX, y, localZ, GenUtils.randChoice(
@@ -560,7 +577,7 @@ public class TerraformGenerator extends ChunkGenerator {
 
                 boolean isCarved = false;
                 if (cavesEnabled) {
-                    isCarved = compositeSampler.canCarve(rawX, y, rawZ, surfaceHeight, cache);
+                    isCarved = columnSampler.canCarve(y);
                 }
                 if (isCarved) {
                     chunkData.setBlock(localX, y, localZ, CommonMat.CAVE_AIR);
