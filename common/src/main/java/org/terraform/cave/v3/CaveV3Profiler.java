@@ -29,10 +29,14 @@ public final class CaveV3Profiler {
     }
 
     public static void recordEvent(@NotNull String key) {
+        recordEvents(key, 1L);
+    }
+
+    public static void recordEvents(@NotNull String key, long count) {
         if (!isEnabled()) {
             return;
         }
-        STATS.computeIfAbsent(key, ignored -> new Stat()).recordEvent();
+        STATS.computeIfAbsent(key, ignored -> new Stat()).recordEvent(count);
     }
 
     public static boolean hasSamples() {
@@ -102,8 +106,8 @@ public final class CaveV3Profiler {
         private final LongAdder totalNanos = new LongAdder();
         private final AtomicLong maxNanos = new AtomicLong();
 
-        private void recordEvent() {
-            calls.increment();
+        private void recordEvent(long count) {
+            calls.add(count);
         }
 
         private void recordDuration(long nanos) {

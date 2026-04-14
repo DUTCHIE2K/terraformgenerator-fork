@@ -42,6 +42,11 @@ public final class BaseSurfaceMapStoreV3 {
         }
     }
 
+    public static boolean hasBaseSurfaceChunk(@NotNull TerraformWorld tw, int chunkX, int chunkZ) {
+        SurfaceCaches caches = getWorldCaches(tw);
+        return caches.chunks().getIfPresent(new LocalChunkKey(chunkX, chunkZ)) != null;
+    }
+
     public static @NotNull BaseSurfaceMap getBaseSurfaceMap(@NotNull TerraformWorld tw,
                                                             int chunkX,
                                                             int chunkZ,

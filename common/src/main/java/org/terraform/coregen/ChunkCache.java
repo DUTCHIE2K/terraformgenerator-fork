@@ -3,7 +3,6 @@ package org.terraform.coregen;
 import org.terraform.biome.BiomeBank;
 import org.terraform.data.TerraformWorld;
 import org.terraform.main.TerraformGeneratorPlugin;
-import org.terraform.utils.datastructs.CompressedChunkBools;
 
 import java.util.Arrays;
 
@@ -33,8 +32,9 @@ public class ChunkCache {
     float[] yBarrierNoiseCache;
     float[] bottomSealYCache;
     volatile boolean transformedHeightsFilled;
+    volatile boolean prefillScheduled;
+    CompositeV3ChunkPrefill compositeV3ChunkPrefill;
 
-    CompressedChunkBools solids;
     BiomeBank[] biomeCache;
 
     public ChunkCache(TerraformWorld tw, int chunkX, int chunkZ) {
@@ -56,6 +56,8 @@ public class ChunkCache {
         highestGroundCache = new short[256];
         Arrays.fill(highestGroundCache, (short) CHUNKCACHE_INVAL);
         transformedHeightsFilled = false;
+        prefillScheduled = false;
+        compositeV3ChunkPrefill = null;
 
         /*
         If arrays.fill gives further speed problems, just use
@@ -65,21 +67,18 @@ public class ChunkCache {
         */
 
         //11/4/2025 not fucking adding more things to the sacred array are ya???
-        solids = new CompressedChunkBools();
         biomeCache = new BiomeBank[256];
     }
 
     public void cacheSolid(int interChunkX, int interChunkY, int interChunkZ)
     {
-        solids.set(interChunkX,interChunkY,interChunkZ);
     }
     public void cacheNonSolid(int interChunkX, int interChunkY, int interChunkZ)
     {
-        solids.unSet(interChunkX,interChunkY,interChunkZ);
     }
     public boolean isSolid(int interChunkX, int interChunkY, int interChunkZ)
     {
-        return solids.isSet(interChunkX,interChunkY,interChunkZ);
+        return false;
     }
 
     public double getHeightMapHeight(int rawX, int rawZ) {
@@ -110,6 +109,31 @@ public class ChunkCache {
 
     public void markTransformedHeightsFilled() {
         transformedHeightsFilled = true;
+        prefillScheduled = false;
+    }
+
+    public boolean tryMarkPrefillScheduled() {
+        if (transformedHeightsFilled || prefillScheduled) {
+            return false;
+        }
+        prefillScheduled = true;
+        return true;
+    }
+
+    public void clearPrefillScheduled() {
+        prefillScheduled = false;
+    }
+
+    public boolean hasCompositeV3ChunkPrefill() {
+        return compositeV3ChunkPrefill != null;
+    }
+
+    public CompositeV3ChunkPrefill getCompositeV3ChunkPrefill() {
+        return compositeV3ChunkPrefill;
+    }
+
+    public void cacheCompositeV3ChunkPrefill(CompositeV3ChunkPrefill prefill) {
+        compositeV3ChunkPrefill = prefill;
     }
 
     /**
@@ -184,5 +208,38 @@ public class ChunkCache {
     @Override
     public String toString(){
         return tw.getName() + ":" + chunkX + "," + chunkZ;
+    }
+
+    public static final class CompositeV3ChunkPrefill {
+        private final CompositeV3ColumnPrefill[] columns;
+
+        public CompositeV3ChunkPrefill(CompositeV3ColumnPrefill[] columns) {
+            if (columns.length != 256) {
+                throw new IllegalArgumentException("CompositeV3ChunkPrefill requires exactly 256 columns");
+            }
+            this.columns = columns;
+        }
+
+        public CompositeV3ColumnPrefill getColumn(int chunkSubX, int chunkSubZ) {
+            return columns[chunkSubX + 16 * chunkSubZ];
+        }
+    }
+
+    public static final class CompositeV3ColumnPrefill {
+        private final short transformedHeight;
+        private final short[] carvedAirRuns;
+
+        public CompositeV3ColumnPrefill(short transformedHeight, short[] carvedAirRuns) {
+            this.transformedHeight = transformedHeight;
+            this.carvedAirRuns = carvedAirRuns;
+        }
+
+        public short getTransformedHeight() {
+            return transformedHeight;
+        }
+
+        public short[] getCarvedAirRuns() {
+            return carvedAirRuns;
+        }
     }
 }
