@@ -193,6 +193,8 @@ public final class Phase3BTunnelFieldProvider implements CaveFieldProvider {
                                                      @NotNull DensitySampleContext context,
                                                      float minRelevantLocalScore)
     {
+        // The support probe stays separate from exact geometry accumulation on purpose:
+        // it is the cheap exact-negative stage that keeps tunnel.full from exploding.
         ensureTunnelProbe(continuityNoise, junctionNoise, context);
         float requiredSmoothedCore = Float.isFinite(minRelevantLocalScore)
                                      ? getRequiredSmoothedTunnelCore(context, minRelevantLocalScore)
@@ -301,6 +303,9 @@ public final class Phase3BTunnelFieldProvider implements CaveFieldProvider {
 
         try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start(PROBE_GEOMETRY_PROFILER_KEY)) {
             float tunnelCoreUpperBound = 0f;
+            // This geometry probe is intentionally conservative and separate from tunnel.full.
+            // Past attempts to fuse the two without preserving equally strong negative rejection
+            // caused tunnel.full sampling to spike and regressed total generation time.
             for (int clearanceIndex = 0; clearanceIndex < TUNNEL_CLEARANCE_COUNT; clearanceIndex++) {
                 tunnelCoreUpperBound = Math.max(
                         tunnelCoreUpperBound,

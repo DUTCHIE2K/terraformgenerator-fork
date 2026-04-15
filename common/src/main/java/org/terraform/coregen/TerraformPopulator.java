@@ -5,8 +5,10 @@ import org.bukkit.generator.BlockPopulator;
 import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
 import org.terraform.biome.cavepopulators.MasterCavePopulatorDistributor;
+import org.terraform.cave.v3.CaveV3Profiler;
 import org.terraform.cave.v3.CaveSnapshotStoreV3;
 import org.terraform.cave.v3.CaveSnapshotV3;
+import org.terraform.coregen.bukkit.TerraformGenerator;
 import org.terraform.coregen.populatordata.PopulatorDataAbstract;
 import org.terraform.coregen.populatordata.PopulatorDataPostGen;
 import org.terraform.coregen.populatordata.PopulatorDataSpigotAPI;
@@ -256,6 +258,13 @@ public class TerraformPopulator extends BlockPopulator {
         // Cave populators
         // They will recalculate biomes per block.
         CaveSnapshotV3 snapshotV3 = CaveSnapshotStoreV3.takeGameplay(tw, data.getChunkX(), data.getChunkZ());
+        if (snapshotV3 == null) {
+            ChunkCache cache = TerraformGenerator.getCache(tw, data.getChunkX(), data.getChunkZ());
+            if (cache.hasCompositeV3ChunkPrefill()) {
+                CaveV3Profiler.recordEvent("cave-v3.populate.snapshot-prefill-hit");
+                snapshotV3 = cache.getCompositeV3ChunkPrefill().toSnapshot(data.getChunkX(), data.getChunkZ());
+            }
+        }
         if (snapshotV3 == null) {
             logMissingCaveSnapshot(tw, data);
         }

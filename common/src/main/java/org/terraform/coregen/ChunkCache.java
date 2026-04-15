@@ -1,10 +1,14 @@
 package org.terraform.coregen;
 
+import org.terraform.cave.v3.CaveColumnV3;
+import org.terraform.cave.v3.CaveIntervalV3;
+import org.terraform.cave.v3.CaveSnapshotV3;
 import org.terraform.biome.BiomeBank;
 import org.terraform.data.TerraformWorld;
 import org.terraform.main.TerraformGeneratorPlugin;
 
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * I don't know why Z and X indices are swapped consistently here.
@@ -212,26 +216,52 @@ public class ChunkCache {
 
     public static final class CompositeV3ChunkPrefill {
         private final CompositeV3ColumnPrefill[] columns;
+        private final CaveColumnV3[] snapshotColumns;
 
         public CompositeV3ChunkPrefill(CompositeV3ColumnPrefill[] columns) {
             if (columns.length != 256) {
                 throw new IllegalArgumentException("CompositeV3ChunkPrefill requires exactly 256 columns");
             }
             this.columns = columns;
+            this.snapshotColumns = new CaveColumnV3[256];
+            for (int i = 0; i < columns.length; i++) {
+                CompositeV3ColumnPrefill column = columns[i];
+                snapshotColumns[i] = new CaveColumnV3(
+                        column.getBaseSurfaceY(),
+                        column.getTransformedHeight(),
+                        column.getCaveIntervals()
+                );
+            }
         }
 
         public CompositeV3ColumnPrefill getColumn(int chunkSubX, int chunkSubZ) {
             return columns[chunkSubX + 16 * chunkSubZ];
         }
+
+        public CaveSnapshotV3 toSnapshot(int chunkX, int chunkZ) {
+            return new CaveSnapshotV3(chunkX, chunkZ, snapshotColumns);
+        }
     }
 
     public static final class CompositeV3ColumnPrefill {
+        private final short baseSurfaceY;
         private final short transformedHeight;
         private final short[] carvedAirRuns;
+        private final List<CaveIntervalV3> caveIntervals;
 
-        public CompositeV3ColumnPrefill(short transformedHeight, short[] carvedAirRuns) {
+        public CompositeV3ColumnPrefill(short baseSurfaceY,
+                                        short transformedHeight,
+                                        short[] carvedAirRuns,
+                                        List<CaveIntervalV3> caveIntervals)
+        {
+            this.baseSurfaceY = baseSurfaceY;
             this.transformedHeight = transformedHeight;
             this.carvedAirRuns = carvedAirRuns;
+            this.caveIntervals = List.copyOf(caveIntervals);
+        }
+
+        public short getBaseSurfaceY() {
+            return baseSurfaceY;
         }
 
         public short getTransformedHeight() {
@@ -240,6 +270,10 @@ public class ChunkCache {
 
         public short[] getCarvedAirRuns() {
             return carvedAirRuns;
+        }
+
+        public List<CaveIntervalV3> getCaveIntervals() {
+            return caveIntervals;
         }
     }
 }

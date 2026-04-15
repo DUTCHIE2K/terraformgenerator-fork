@@ -213,6 +213,18 @@ public class TimingsCommand extends TerraCommand {
                 sender.sendMessage(formatValueLine("prefill full-column scheduled", fullColumnScheduled));
                 sender.sendMessage(formatValueLine("prefill full-column completed", fullColumnCompleted));
             }
+            long fullColumnDowngradedCap = getCalls(
+                    snapshotsByKey,
+                    "cave-v3.prefill-neighbor.full-column-downgraded-cap"
+            );
+            long fullColumnDowngradedStale = getCalls(
+                    snapshotsByKey,
+                    "cave-v3.prefill-neighbor.full-column-downgraded-stale"
+            );
+            if (fullColumnDowngradedCap > 0L || fullColumnDowngradedStale > 0L) {
+                sender.sendMessage(formatValueLine("prefill full-column downgraded cap", fullColumnDowngradedCap));
+                sender.sendMessage(formatValueLine("prefill full-column downgraded stale", fullColumnDowngradedStale));
+            }
         }
 
         for (CaveV3Profiler.SectionSnapshot snapshot : CaveV3Profiler.snapshot()) {
@@ -419,6 +431,18 @@ public class TimingsCommand extends TerraCommand {
             if (fullColumnScheduled > 0L || fullColumnCompleted > 0L) {
                 lines.add(formatPlainValueLine("prefill_full_column_scheduled", fullColumnScheduled));
                 lines.add(formatPlainValueLine("prefill_full_column_completed", fullColumnCompleted));
+            }
+            long fullColumnDowngradedCap = getCalls(
+                    snapshotsByKey,
+                    "cave-v3.prefill-neighbor.full-column-downgraded-cap"
+            );
+            long fullColumnDowngradedStale = getCalls(
+                    snapshotsByKey,
+                    "cave-v3.prefill-neighbor.full-column-downgraded-stale"
+            );
+            if (fullColumnDowngradedCap > 0L || fullColumnDowngradedStale > 0L) {
+                lines.add(formatPlainValueLine("prefill_full_column_downgraded_cap", fullColumnDowngradedCap));
+                lines.add(formatPlainValueLine("prefill_full_column_downgraded_stale", fullColumnDowngradedStale));
             }
         }
 

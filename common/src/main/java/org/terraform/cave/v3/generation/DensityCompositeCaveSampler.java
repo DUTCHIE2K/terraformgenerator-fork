@@ -108,6 +108,8 @@ public final class DensityCompositeCaveSampler implements CompositeCaveSampler {
         for (int i = 0; i < fieldSamplers.length; i++) {
             CaveFieldSampler fieldSampler = fieldSamplers[i];
             float minRelevantLocalScore = Math.max(bestLocalScore, globalPenalty);
+            // Keep the "can beat" check separate from exact scoring. In the tunnel field this looks redundant,
+            // but the dedicated negative proof materially reduces how often the exact tunnel path runs.
             if (!fieldSampler.canBeatLocalScore(sampleContext, minRelevantLocalScore)) {
                 CaveV3Profiler.recordEvent(fieldPrunedProfilerKeys[i]);
                 if (bestLocalScore >= globalPenalty) {

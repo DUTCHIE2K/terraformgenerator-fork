@@ -43,12 +43,16 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class TerraformGenerator extends ChunkGenerator {
     public static final List<SimpleChunkLocation> preWorldInitGen = new ArrayList<>();
+    private static final int MAX_CONCURRENT_FULL_COLUMN_PREFILLS = 2;
     private static final int[] SURFACE_PREFILL_NEIGHBOR_X = {1, -1, 0, 0};
     private static final int[] SURFACE_PREFILL_NEIGHBOR_Z = {0, 0, 1, -1};
     private static final ConcurrentHashMap<TerraformWorld, ChunkCoord> LAST_COMPLETED_GENERATION = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<TerraformWorld, ChunkCoord> PREFERRED_FULL_COLUMN_PREFILL = new ConcurrentHashMap<>();
+    private static final AtomicInteger FULL_COLUMN_PREFILLS_IN_FLIGHT = new AtomicInteger();
     // Explode if a read is attempted. Transform Handlers are not supposed to read.
     private static final DudChunkData DUD = new DudChunkData();
     //This cache is NOT fucking used correctly.
@@ -58,7 +62,9 @@ public class TerraformGenerator extends ChunkGenerator {
     public static int seaLevel = 62;
     private record CarvedInterval(short ceilingAirY, short floorSolidY) {}
     private record ChunkCoord(int x, int z) {}
-    private record PrefilledDensityColumn(short transformedHeight, short[] carvedAirRuns) {}
+    private record PrefilledDensityColumn(short transformedHeight,
+                                         short[] carvedAirRuns,
+                                         @NotNull List<CaveIntervalV3> snapshotIntervals) {}
 
     public static void updateSeaLevelFromConfig() {
         seaLevel = TConfig.c.HEIGHT_MAP_SEA_LEVEL;
@@ -173,14 +179,21 @@ public class TerraformGenerator extends ChunkGenerator {
             return;
         }
 
+        // The current best-performing exact strategy is mixed prewarm:
+        // one predicted next chunk gets the expensive full-column cave prefill,
+        // while the cardinal ring only gets cheaper surface data warming.
         ChunkCoord fullColumnTarget = getFullColumnPrefillTarget(chunkX, chunkZ, previousChunk);
         if (fullColumnTarget != null) {
+            PREFERRED_FULL_COLUMN_PREFILL.put(tw, fullColumnTarget);
             scheduleNeighborPrefill(
                     tw,
                     fullColumnTarget.x(),
                     fullColumnTarget.z(),
                     true
             );
+        }
+        else {
+            PREFERRED_FULL_COLUMN_PREFILL.remove(tw);
         }
 
         for (int i = 0; i < SURFACE_PREFILL_NEIGHBOR_X.length; i++) {
@@ -206,22 +219,22 @@ public class TerraformGenerator extends ChunkGenerator {
                                                 int neighborChunkZ,
                                                 boolean shouldPrefillFullColumn)
     {
-            ChunkCache neighborCache = getCache(tw, neighborChunkX, neighborChunkZ);
-            if (neighborCache.areTransformedHeightsFilled()) {
-                CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.skip-filled");
-                return;
-            }
-            if (!neighborCache.tryMarkPrefillScheduled()) {
-                CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.skip-scheduled");
-                return;
-            }
+        ChunkCache neighborCache = getCache(tw, neighborChunkX, neighborChunkZ);
+        if (neighborCache.areTransformedHeightsFilled()) {
+            CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.skip-filled");
+            return;
+        }
+        if (!neighborCache.tryMarkPrefillScheduled()) {
+            CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.skip-scheduled");
+            return;
+        }
 
-            if (shouldPrefillFullColumn) {
-                scheduleNeighborFullColumnPrefill(tw, neighborChunkX, neighborChunkZ, neighborCache);
-            }
-            else {
-                scheduleNeighborSurfacePrefill(tw, neighborChunkX, neighborChunkZ, neighborCache);
-            }
+        if (shouldPrefillFullColumn) {
+            scheduleNeighborFullColumnPrefill(tw, neighborChunkX, neighborChunkZ, neighborCache);
+        }
+        else {
+            scheduleNeighborSurfacePrefill(tw, neighborChunkX, neighborChunkZ, neighborCache);
+        }
     }
 
     private static ChunkCoord getFullColumnPrefillTarget(int chunkX, int chunkZ, ChunkCoord previousChunk) {
@@ -243,6 +256,14 @@ public class TerraformGenerator extends ChunkGenerator {
                                                           int neighborChunkZ,
                                                           @NotNull ChunkCache neighborCache)
     {
+        // Do not let heavy exact prefills fan out without bound. When the heavy lane is saturated,
+        // degrade gracefully to the lighter surface prewarm instead of starting more full cave jobs.
+        if (!tryAcquireFullColumnPrefillSlot()) {
+            CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.full-column-downgraded-cap");
+            scheduleNeighborSurfacePrefill(tw, neighborChunkX, neighborChunkZ, neighborCache);
+            return;
+        }
+
         CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.full-column-scheduled");
         TerraformGeneratorPlugin.taskScheduler.execAsync(() -> {
             try {
@@ -250,10 +271,16 @@ public class TerraformGenerator extends ChunkGenerator {
                     CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.skip-filled-late");
                     return;
                 }
+                if (!isPreferredFullColumnTarget(tw, neighborChunkX, neighborChunkZ)) {
+                    CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.full-column-downgraded-stale");
+                    completeSurfacePrefill(tw, neighborChunkX, neighborChunkZ, neighborCache);
+                    return;
+                }
                 buildCompositeV3ChunkPrefill(tw, neighborChunkX, neighborChunkZ, neighborCache);
                 CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.full-column-completed");
             }
             finally {
+                releaseFullColumnPrefillSlot();
                 neighborCache.clearPrefillScheduled();
             }
         });
@@ -273,17 +300,50 @@ public class TerraformGenerator extends ChunkGenerator {
         CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.surface-scheduled");
         TerraformGeneratorPlugin.taskScheduler.execAsync(() -> {
             try {
-                if (neighborCache.areTransformedHeightsFilled()) {
-                    CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.skip-filled-late");
-                    return;
-                }
-                BaseSurfaceMapStoreV3.getBaseSurfaceChunk(tw, neighborChunkX, neighborChunkZ);
-                CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.surface-completed");
+                completeSurfacePrefill(tw, neighborChunkX, neighborChunkZ, neighborCache);
             }
             finally {
                 neighborCache.clearPrefillScheduled();
             }
         });
+    }
+
+    private static void completeSurfacePrefill(@NotNull TerraformWorld tw,
+                                               int neighborChunkX,
+                                               int neighborChunkZ,
+                                               @NotNull ChunkCache neighborCache)
+    {
+        if (neighborCache.areTransformedHeightsFilled()) {
+            CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.skip-filled-late");
+            return;
+        }
+        if (BaseSurfaceMapStoreV3.hasBaseSurfaceChunk(tw, neighborChunkX, neighborChunkZ)) {
+            CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.skip-surface-cached");
+            return;
+        }
+        BaseSurfaceMapStoreV3.getBaseSurfaceChunk(tw, neighborChunkX, neighborChunkZ);
+        CaveV3Profiler.recordEvent("cave-v3.prefill-neighbor.surface-completed");
+    }
+
+    private static boolean isPreferredFullColumnTarget(@NotNull TerraformWorld tw, int chunkX, int chunkZ) {
+        ChunkCoord preferredTarget = PREFERRED_FULL_COLUMN_PREFILL.get(tw);
+        return preferredTarget != null && preferredTarget.x() == chunkX && preferredTarget.z() == chunkZ;
+    }
+
+    private static boolean tryAcquireFullColumnPrefillSlot() {
+        while (true) {
+            int inFlight = FULL_COLUMN_PREFILLS_IN_FLIGHT.get();
+            if (inFlight >= MAX_CONCURRENT_FULL_COLUMN_PREFILLS) {
+                return false;
+            }
+            if (FULL_COLUMN_PREFILLS_IN_FLIGHT.compareAndSet(inFlight, inFlight + 1)) {
+                return true;
+            }
+        }
+    }
+
+    private static void releaseFullColumnPrefillSlot() {
+        FULL_COLUMN_PREFILLS_IN_FLIGHT.decrementAndGet();
     }
 
     private static void buildCompositeV3ChunkPrefill(@NotNull TerraformWorld tw,
@@ -302,6 +362,9 @@ public class TerraformGenerator extends ChunkGenerator {
                 CompositeCaveSampler compositeSampler = createCompositeV3Sampler(tw);
                 ChunkCache.CompositeV3ColumnPrefill[] columns = new ChunkCache.CompositeV3ColumnPrefill[256];
 
+                // This is an exact accelerator, not an approximation. We run the same column sampler that
+                // live generation would use, cache the transformed top solid plus carved air runs, and later
+                // replay those runs directly on the generation-critical path.
                 for (int x = 0; x < 16; x++) {
                     for (int z = 0; z < 16; z++) {
                         int rawX = chunkX * 16 + x;
@@ -317,11 +380,13 @@ public class TerraformGenerator extends ChunkGenerator {
                                 columnSampler,
                                 baseSurfaceY
                         );
-                        cache.writeTransformedHeight(x, z, prefilledColumn.transformedHeight());
                         columns[getColumnIndex(x, z)] = new ChunkCache.CompositeV3ColumnPrefill(
+                                (short) baseSurfaceY,
                                 prefilledColumn.transformedHeight(),
-                                prefilledColumn.carvedAirRuns()
+                                prefilledColumn.carvedAirRuns(),
+                                prefilledColumn.snapshotIntervals()
                         );
+                        cache.writeTransformedHeight(x, z, prefilledColumn.transformedHeight());
                     }
                 }
 
@@ -368,7 +433,13 @@ public class TerraformGenerator extends ChunkGenerator {
             rawAirRuns.add((short) activeCaveAirTop);
         }
 
-        return new PrefilledDensityColumn(transformedHeight, toShortArray(rawAirRuns));
+        short[] carvedAirRuns = toShortArray(rawAirRuns);
+        List<CarvedInterval> carvedIntervals = toCaveIntervalsFromAirRuns(carvedAirRuns, transformedHeight, minY);
+        return new PrefilledDensityColumn(
+                transformedHeight,
+                carvedAirRuns,
+                toV3Intervals(transformedHeight, carvedIntervals)
+        );
     }
 
     private static short @NotNull [] toShortArray(@NotNull List<Short> values) {
@@ -582,13 +653,13 @@ public class TerraformGenerator extends ChunkGenerator {
                                           @NotNull ChunkData chunkData)
     {
         try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start("cave-v3.generate-noise")) {
-            CaveSnapshotV3Builder caveBuilderV3 = new CaveSnapshotV3Builder(chunkX, chunkZ);
-            @SuppressWarnings("unchecked")
-            List<CarvedInterval>[] caveIntervalsByColumn = new List[256];
             BaseSurfaceChunkV3 surfaceChunk = BaseSurfaceMapStoreV3.getBaseSurfaceChunk(tw, chunkX, chunkZ);
             boolean cavesEnabled = TConfig.areCavesEnabled();
             ChunkCache.CompositeV3ChunkPrefill fullColumnPrefill = cavesEnabled ? cache.getCompositeV3ChunkPrefill() : null;
             boolean useFullColumnPrefill = fullColumnPrefill != null;
+            CaveSnapshotV3Builder caveBuilderV3 = useFullColumnPrefill ? null : new CaveSnapshotV3Builder(chunkX, chunkZ);
+            @SuppressWarnings("unchecked")
+            List<CarvedInterval>[] caveIntervalsByColumn = useFullColumnPrefill ? null : new List[256];
             boolean usePrecomputedTopSolidHints = cavesEnabled && cache.areTransformedHeightsFilled();
             CaveV3Profiler.recordEvent(usePrecomputedTopSolidHints
                                        ? "cave-v3.generate-noise.prefilled-top-solid-hit"
@@ -633,7 +704,7 @@ public class TerraformGenerator extends ChunkGenerator {
                     chunkData.setRegion(x, rawTerrainHeight + 1, z, x + 1, seaLevel + 1, z + 1, CommonMat.WATER);
                     surfaceChunk.replaySurfaceWrites(chunkData, x, z);
 
-                    caveIntervalsByColumn[columnIndex] = carveDensityFieldColumn(
+                    List<CarvedInterval> carvedIntervals = carveDensityFieldColumn(
                             compositeSampler,
                             cavesEnabled,
                             cache,
@@ -648,6 +719,9 @@ public class TerraformGenerator extends ChunkGenerator {
                             precomputedTopSolidY,
                             prefilledColumn
                     );
+                    if (!useFullColumnPrefill) {
+                        caveIntervalsByColumn[columnIndex] = carvedIntervals;
+                    }
 
                     for (int i = 1; i < TConfig.c.HEIGHT_MAP_BEDROCK_HEIGHT; i++) {
                         if (GenUtils.chance(dontCareRandom, TConfig.c.HEIGHT_MAP_BEDROCK_DENSITY, 100)) {
@@ -668,30 +742,37 @@ public class TerraformGenerator extends ChunkGenerator {
                     16,
                     CommonMat.BEDROCK
             );
-            for (int x = 0; x < 16; x++) {
-                for (int z = 0; z < 16; z++) {
-                    int columnIndex = getColumnIndex(x, z);
-                    caveBuilderV3.recordColumn(
-                            x,
-                            z,
-                            surfaceChunk.getBaseSurfaceY(x, z),
-                            cache.getTransformedHeight(x, z),
-                            toV3Intervals(
-                                    CompositeCaveGeneratorMode.COMPOSITE_V3,
-                                    compositeSampler,
-                                    cache,
-                                    x,
-                                    z,
-                                    (chunkX << 4) + x,
-                                    (chunkZ << 4) + z,
-                                    surfaceChunk.getBaseSurfaceY(x, z),
-                                    caveIntervalsByColumn[columnIndex]
-                            )
-                    );
-                }
-            }
             cache.markTransformedHeightsFilled();
-            CaveSnapshotV3 snapshotV3 = caveBuilderV3.build();
+            CaveSnapshotV3 snapshotV3;
+            if (useFullColumnPrefill) {
+                CaveV3Profiler.recordEvent("cave-v3.generate-noise.prefilled-snapshot-hit");
+                snapshotV3 = fullColumnPrefill.toSnapshot(chunkX, chunkZ);
+            }
+            else {
+                for (int x = 0; x < 16; x++) {
+                    for (int z = 0; z < 16; z++) {
+                        int columnIndex = getColumnIndex(x, z);
+                        caveBuilderV3.recordColumn(
+                                x,
+                                z,
+                                surfaceChunk.getBaseSurfaceY(x, z),
+                                cache.getTransformedHeight(x, z),
+                                toV3Intervals(
+                                        CompositeCaveGeneratorMode.COMPOSITE_V3,
+                                        compositeSampler,
+                                        cache,
+                                        x,
+                                        z,
+                                        (chunkX << 4) + x,
+                                        (chunkZ << 4) + z,
+                                        surfaceChunk.getBaseSurfaceY(x, z),
+                                        caveIntervalsByColumn[columnIndex]
+                                )
+                        );
+                    }
+                }
+                snapshotV3 = caveBuilderV3.build();
+            }
             CaveSnapshotStoreV3.publishGameplay(tw, chunkX, chunkZ, snapshotV3);
         }
     }
@@ -987,17 +1068,22 @@ public class TerraformGenerator extends ChunkGenerator {
             return Collections.emptyList();
         }
 
+        return toV3Intervals(cache.getTransformedHeight(localX, localZ), intervals);
+    }
+
+    private static @NotNull List<CaveIntervalV3> toV3Intervals(int topSolidY,
+                                                                @NotNull List<CarvedInterval> intervals)
+    {
+        if (intervals.isEmpty()) {
+            return Collections.emptyList();
+        }
+
         List<CaveIntervalV3> result = new ArrayList<>(intervals.size());
         for (CarvedInterval interval : intervals) {
             result.add(new CaveIntervalV3(
                     interval.ceilingAirY(),
                     interval.floorSolidY(),
-                    buildIntervalMetadata(
-                            cache,
-                            localX,
-                            localZ,
-                            interval
-                    )
+                    buildIntervalMetadata(topSolidY, interval)
             ));
         }
         return result;
@@ -1009,6 +1095,12 @@ public class TerraformGenerator extends ChunkGenerator {
                                                                        @NotNull CarvedInterval interval)
     {
         int topSolidY = cache.getTransformedHeight(localX, localZ);
+        return buildIntervalMetadata(topSolidY, interval);
+    }
+
+    private static @NotNull CaveIntervalMetadata buildIntervalMetadata(int topSolidY,
+                                                                       @NotNull CarvedInterval interval)
+    {
         SurfaceConnectivity connectivity = interval.ceilingAirY() > topSolidY ? SurfaceConnectivity.YES : SurfaceConnectivity.NO;
         return new CaveIntervalMetadata(connectivity);
     }
