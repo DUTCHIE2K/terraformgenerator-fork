@@ -260,7 +260,11 @@ public class TerraformPopulator extends BlockPopulator {
         CaveSnapshotV3 snapshotV3 = CaveSnapshotStoreV3.takeGameplay(tw, data.getChunkX(), data.getChunkZ());
         if (snapshotV3 == null) {
             ChunkCache cache = TerraformGenerator.getCache(tw, data.getChunkX(), data.getChunkZ());
-            if (cache.hasCompositeV3ChunkPrefill()) {
+            if (cache.hasGameplaySnapshotV3()) {
+                CaveV3Profiler.recordEvent("cave-v3.populate.snapshot-cache-hit");
+                snapshotV3 = cache.getGameplaySnapshotV3();
+            }
+            else if (cache.hasCompositeV3ChunkPrefill()) {
                 CaveV3Profiler.recordEvent("cave-v3.populate.snapshot-prefill-hit");
                 snapshotV3 = cache.getCompositeV3ChunkPrefill().toSnapshot(data.getChunkX(), data.getChunkZ());
             }

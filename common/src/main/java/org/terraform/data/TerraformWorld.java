@@ -131,9 +131,10 @@ public class TerraformWorld {
         synchronized (this) {
             sampler = compositeV3CaveSampler;
             if (sampler == null) {
-                CaveFieldSampler cheeseSampler = new Phase3ACheeseFieldProvider().createSampler(this);
+                Phase3ACheeseFieldProvider cheeseProvider = new Phase3ACheeseFieldProvider();
+                CaveFieldSampler cheeseSampler = cheeseProvider.createSampler(this);
                 CaveFieldSampler tunnelSampler = new Phase3BTunnelFieldProvider().createSampler(this);
-                sampler = new DensityCompositeCaveSampler(this, cheeseSampler, tunnelSampler);
+                sampler = new DensityCompositeCaveSampler(this, cheeseProvider, cheeseSampler, tunnelSampler);
                 compositeV3CaveSampler = sampler;
             }
         }

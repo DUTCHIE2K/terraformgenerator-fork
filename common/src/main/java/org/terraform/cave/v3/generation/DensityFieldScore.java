@@ -46,6 +46,25 @@ final class DensityFieldScore {
         return makeBaseDensityThresholdSafe(localScore, requiredScore + DensityCarveRules.getBaseThreshold());
     }
 
+    static float minMonotonicBaseDensityForLocalScore(float localScore) {
+        if (Float.isNaN(localScore)) {
+            return Float.NaN;
+        }
+        if (localScore == Float.NEGATIVE_INFINITY) {
+            return Float.NEGATIVE_INFINITY;
+        }
+        if (localScore == Float.POSITIVE_INFINITY) {
+            return Float.POSITIVE_INFINITY;
+        }
+
+        // toLocalScore has a soft-band discontinuity at the base threshold, so the lowest
+        // density that can satisfy a threshold is not always safe for early-return. This
+        // monotonic variant stays on the post-threshold branch where higher density cannot
+        // reduce the returned local score.
+        float requiredScore = Math.max(localScore, 0f);
+        return makeBaseDensityThresholdSafe(localScore, requiredScore + DensityCarveRules.getBaseThreshold());
+    }
+
     private static float makeBaseDensityThresholdSafe(float localScore, float requiredBaseDensity) {
         if (!Float.isFinite(localScore) || !Float.isFinite(requiredBaseDensity)) {
             return requiredBaseDensity;

@@ -638,6 +638,7 @@ public class TerraformGenerator extends ChunkGenerator {
                 }
                 cache.markTransformedHeightsFilled();
                 CaveSnapshotV3 snapshotV3 = caveBuilderV3.build();
+                cache.cacheGameplaySnapshotV3(snapshotV3);
                 CaveSnapshotStoreV3.publishGameplay(tw, chunkX, chunkZ, snapshotV3);
             }
         }
@@ -773,6 +774,7 @@ public class TerraformGenerator extends ChunkGenerator {
                 }
                 snapshotV3 = caveBuilderV3.build();
             }
+            cache.cacheGameplaySnapshotV3(snapshotV3);
             CaveSnapshotStoreV3.publishGameplay(tw, chunkX, chunkZ, snapshotV3);
         }
     }

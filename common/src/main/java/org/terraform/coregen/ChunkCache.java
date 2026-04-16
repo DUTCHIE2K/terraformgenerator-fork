@@ -38,6 +38,7 @@ public class ChunkCache {
     volatile boolean transformedHeightsFilled;
     volatile boolean prefillScheduled;
     CompositeV3ChunkPrefill compositeV3ChunkPrefill;
+    CaveSnapshotV3 gameplaySnapshotV3;
 
     BiomeBank[] biomeCache;
 
@@ -62,6 +63,7 @@ public class ChunkCache {
         transformedHeightsFilled = false;
         prefillScheduled = false;
         compositeV3ChunkPrefill = null;
+        gameplaySnapshotV3 = null;
 
         /*
         If arrays.fill gives further speed problems, just use
@@ -138,6 +140,18 @@ public class ChunkCache {
 
     public void cacheCompositeV3ChunkPrefill(CompositeV3ChunkPrefill prefill) {
         compositeV3ChunkPrefill = prefill;
+    }
+
+    public boolean hasGameplaySnapshotV3() {
+        return gameplaySnapshotV3 != null;
+    }
+
+    public CaveSnapshotV3 getGameplaySnapshotV3() {
+        return gameplaySnapshotV3;
+    }
+
+    public void cacheGameplaySnapshotV3(CaveSnapshotV3 snapshotV3) {
+        gameplaySnapshotV3 = snapshotV3;
     }
 
     /**

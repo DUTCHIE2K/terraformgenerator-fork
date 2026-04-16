@@ -7,15 +7,10 @@ import java.util.Arrays;
 
 public final class DensitySampleContext {
     private static final int TUNNEL_BRANCH_SLOT_COUNT = 10;
-    private static final float WARP_SCALE = 0.7f;
-    private static final float WARP_VERTICAL_SCALE = 0.7f;
-    private static final float WARP_HORIZONTAL_AMPLITUDE = 7f;
-    private static final float WARP_VERTICAL_AMPLITUDE = 3.25f;
-    private static final float CHAMBER_HORIZONTAL_STRETCH = 0.28f;
-    private static final float CHAMBER_VERTICAL_STRETCH = 0.41f;
 
     private final @NotNull FastNoise warpNoise;
     private final @NotNull FastNoise chamberNoise;
+    private final @NotNull CheeseFieldModel.DomainWarp cheeseDomainWarp;
 
     int rawX;
     int y;
@@ -45,9 +40,13 @@ public final class DensitySampleContext {
     private final float[] tunnelBranchProbeAxisValues = new float[TUNNEL_BRANCH_SLOT_COUNT];
     private final boolean[] tunnelBranchProbeAxisComputed = new boolean[TUNNEL_BRANCH_SLOT_COUNT];
 
-    DensitySampleContext(@NotNull FastNoise warpNoise, @NotNull FastNoise chamberNoise) {
+    DensitySampleContext(@NotNull FastNoise warpNoise,
+                         @NotNull FastNoise chamberNoise,
+                         @NotNull CheeseFieldModel.DomainWarp cheeseDomainWarp)
+    {
         this.warpNoise = warpNoise;
         this.chamberNoise = chamberNoise;
+        this.cheeseDomainWarp = cheeseDomainWarp;
     }
 
     void prepare(int rawX, int y, int rawZ, double baseSurfaceHeight) {
@@ -56,20 +55,20 @@ public final class DensitySampleContext {
         this.rawZ = rawZ;
         this.baseSurfaceHeight = baseSurfaceHeight;
 
-        float warpSampleX = rawX * WARP_SCALE;
-        float warpSampleY = y * WARP_VERTICAL_SCALE;
-        float warpSampleZ = rawZ * WARP_SCALE;
+        float warpSampleX = rawX * cheeseDomainWarp.horizontalWarpScale();
+        float warpSampleY = y * cheeseDomainWarp.verticalWarpScale();
+        float warpSampleZ = rawZ * cheeseDomainWarp.horizontalWarpScale();
         warpedX = rawX + (warpNoise.GetNoise(warpSampleX + 13.2f, warpSampleY - 7.4f, warpSampleZ + 5.1f)
-                          * WARP_HORIZONTAL_AMPLITUDE);
+                          * cheeseDomainWarp.horizontalWarpAmplitude());
         warpedY = y + (warpNoise.GetNoise(warpSampleX - 11.7f, warpSampleY + 17.6f, warpSampleZ - 9.3f)
-                       * WARP_VERTICAL_AMPLITUDE);
+                       * cheeseDomainWarp.verticalWarpAmplitude());
         warpedZ = rawZ + (warpNoise.GetNoise(warpSampleX + 7.8f, warpSampleY + 3.1f, warpSampleZ - 15.4f)
-                          * WARP_HORIZONTAL_AMPLITUDE);
+                          * cheeseDomainWarp.horizontalWarpAmplitude());
 
         chamber = 0.5f + (0.5f * chamberNoise.GetNoise(
-                warpedX * CHAMBER_HORIZONTAL_STRETCH,
-                warpedY * CHAMBER_VERTICAL_STRETCH,
-                warpedZ * CHAMBER_HORIZONTAL_STRETCH
+                warpedX * cheeseDomainWarp.chamberHorizontalStretch(),
+                warpedY * cheeseDomainWarp.chamberVerticalStretch(),
+                warpedZ * cheeseDomainWarp.chamberHorizontalStretch()
         ));
         depthBelowSurface = (float) (baseSurfaceHeight - y);
         tunnelProbeComputed = false;
@@ -105,6 +104,20 @@ public final class DensitySampleContext {
         this.tunnelPivotSmoothedCore = tunnelPivotSmoothedCore;
         this.tunnelContinuityComputed = true;
         this.tunnelProbeComputed = true;
+    }
+
+    void cacheTunnelProbe(@NotNull TunnelFieldModel.SupportProfile supportProfile) {
+        cacheTunnelProbe(
+                supportProfile.chamberLink(),
+                supportProfile.continuity(),
+                supportProfile.junction(),
+                supportProfile.tunnelWidthBoost(),
+                supportProfile.tunnelDensityBelowPivotIntercept(),
+                supportProfile.tunnelDensityBelowPivotSlope(),
+                supportProfile.tunnelDensityAbovePivotIntercept(),
+                supportProfile.tunnelDensityAbovePivotSlope(),
+                supportProfile.tunnelPivotSmoothedCore()
+        );
     }
 
     void cacheTunnelGeometryUpperBound(float tunnelGeometryUpperBound) {

@@ -373,6 +373,12 @@ public class TConfig extends YamlFileInterface {
     @YamlComment("Collect Cave V3 timing counters for /terra timings. Leave this off unless you are profiling generation.")
     @YamlKey("dev-stuff.cave-v3-profile")
     public boolean DEVSTUFF_CAVE_V3_PROFILE = false;
+    @YamlComment("Dev-only: compare optimized Cave V3 tunnel decisions against a slow reference evaluator. Heavy CPU cost; keep disabled unless tuning cave shaping.")
+    @YamlKey("dev-stuff.cave-v3-verify-optimizer")
+    public boolean DEVSTUFF_CAVE_V3_VERIFY_OPTIMIZER = false;
+    @YamlComment("Dev-only sample rate for cave-v3 optimizer verification. 4096 means about one voxel check per 4096 considered voxels.")
+    @YamlKey("dev-stuff.cave-v3-verify-optimizer-sample-rate")
+    public int DEVSTUFF_CAVE_V3_VERIFY_OPTIMIZER_SAMPLE_RATE = 4096;
     @YamlKey("dev-stuff.force-only-vanilla-mushrooms")
     public boolean DEVSTUFF_VANILLA_MUSHROOMS = false;
     @YamlKey("dev-stuff.patcher-cache-max-size")

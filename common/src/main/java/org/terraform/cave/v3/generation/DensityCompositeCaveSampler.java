@@ -4,10 +4,8 @@ import org.jetbrains.annotations.NotNull;
 import org.terraform.cave.v3.CaveV3Profiler;
 import org.terraform.coregen.ChunkCache;
 import org.terraform.data.TerraformWorld;
-import org.terraform.main.TerraformGeneratorPlugin;
 import org.terraform.main.config.TConfig;
 import org.terraform.utils.noise.FastNoise;
-import org.terraform.utils.noise.NoiseCacheHandler;
 
 public final class DensityCompositeCaveSampler implements CompositeCaveSampler {
     private final @NotNull TerraformWorld tw;
@@ -18,9 +16,13 @@ public final class DensityCompositeCaveSampler implements CompositeCaveSampler {
     private final @NotNull String[] fieldEarlyAcceptProfilerKeys;
     private final @NotNull FastNoise warpNoise;
     private final @NotNull FastNoise chamberNoise;
+    private final @NotNull CheeseFieldModel.DomainWarp cheeseDomainWarp;
     private final @NotNull ThreadLocal<DensitySampleContext> directSampleContext;
 
-    public DensityCompositeCaveSampler(@NotNull TerraformWorld tw, @NotNull CaveFieldSampler... fieldSamplers) {
+    public DensityCompositeCaveSampler(@NotNull TerraformWorld tw,
+                                       @NotNull Phase3ACheeseFieldProvider cheeseFieldProvider,
+                                       @NotNull CaveFieldSampler... fieldSamplers)
+    {
         this.tw = tw;
         this.fieldSamplers = fieldSamplers.clone();
         this.fieldPrunedProfilerKeys = new String[this.fieldSamplers.length];
@@ -35,28 +37,9 @@ public final class DensityCompositeCaveSampler implements CompositeCaveSampler {
             this.fieldEarlyAcceptProfilerKeys[i] = "cave-v3.sample.field." + profilerKey + ".early-accept";
         }
         float baseFrequency = Math.max(0.0001f, TConfig.c.CAVES_DENSITY_V1_FREQUENCY);
-        this.warpNoise = NoiseCacheHandler.getNoise(
-                tw,
-                NoiseCacheHandler.NoiseCacheEntry.CAVE_V3_CHEESE_WARP_NOISE,
-                world -> {
-                    FastNoise n = new FastNoise((int) (world.getSeed() * 67L + 0x14D51));
-                    n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
-                    n.SetFrequency(baseFrequency * 0.53f);
-                    n.SetFractalOctaves(2);
-                    return n;
-                }
-        );
-        this.chamberNoise = NoiseCacheHandler.getNoise(
-                tw,
-                NoiseCacheHandler.NoiseCacheEntry.CAVE_V3_CHEESE_BODY_NOISE,
-                world -> {
-                    FastNoise n = new FastNoise((int) (world.getSeed() * 79L + 0x2C771));
-                    n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
-                    n.SetFrequency(baseFrequency * 0.68f);
-                    n.SetFractalOctaves(3);
-                    return n;
-                }
-        );
+        this.warpNoise = cheeseFieldProvider.createWarpNoise(tw, baseFrequency);
+        this.chamberNoise = cheeseFieldProvider.createChamberNoise(tw, baseFrequency);
+        this.cheeseDomainWarp = cheeseFieldProvider.getDomainWarp();
         this.directSampleContext = ThreadLocal.withInitial(this::createSampleContext);
     }
 
@@ -135,7 +118,7 @@ public final class DensityCompositeCaveSampler implements CompositeCaveSampler {
     }
 
     private @NotNull DensitySampleContext createSampleContext() {
-        return new DensitySampleContext(warpNoise, chamberNoise);
+        return new DensitySampleContext(warpNoise, chamberNoise, cheeseDomainWarp);
     }
 
     private final class DensityColumnSampler implements CompositeCaveColumnSampler {
