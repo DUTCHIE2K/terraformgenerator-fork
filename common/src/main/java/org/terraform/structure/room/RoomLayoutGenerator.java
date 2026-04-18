@@ -333,30 +333,30 @@ public class RoomLayoutGenerator {
                 }
             }
             if (room.pop != null) {
-                TerraformGeneratorPlugin.logger.info("Registered: "
-                                                     + room.pop.getClass().getName()
-                                                     + " at "
-                                                     + room.getX()
-                                                     + " "
-                                                     + room.getY()
-                                                     + " "
-                                                     + room.getZ()
-                                                     + " in a room of size "
-                                                     + room.getWidthX()
-                                                     + "x"
-                                                     + room.getWidthZ());
+                TerraformGeneratorPlugin.logger.debug("Registered: "
+                                                      + room.pop.getClass().getName()
+                                                      + " at "
+                                                      + room.getX()
+                                                      + " "
+                                                      + room.getY()
+                                                      + " "
+                                                      + room.getZ()
+                                                      + " in a room of size "
+                                                      + room.getWidthX()
+                                                      + "x"
+                                                      + room.getWidthZ());
             }
             else {
-                TerraformGeneratorPlugin.logger.info("Registered: plain room at "
-                                                     + room.getX()
-                                                     + " "
-                                                     + room.getY()
-                                                     + " "
-                                                     + room.getZ()
-                                                     + " in a room of size "
-                                                     + room.getWidthX()
-                                                     + "x"
-                                                     + room.getWidthZ());
+                TerraformGeneratorPlugin.logger.debug("Registered: plain room at "
+                                                      + room.getX()
+                                                      + " "
+                                                      + room.getY()
+                                                      + " "
+                                                      + room.getZ()
+                                                      + " in a room of size "
+                                                      + room.getWidthX()
+                                                      + "x"
+                                                      + room.getWidthZ());
             }
         }
     }

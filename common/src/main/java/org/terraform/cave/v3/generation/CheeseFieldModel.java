@@ -28,16 +28,16 @@ final class CheeseFieldModel {
                 18f,
                 28f,
                 -0.05f,
-                0.5f,
+                0.63f,
                 0.75f,
                 0.25f,
                 0.08f
                 ),
                 new DomainWarp(
                         0.7f,
-                        0.7f,
-                        7f,
-                        3.25f,
+                        0.3f,
+                        5f,
+                        4f,
                         0.28f,
                         0.41f
                 ),

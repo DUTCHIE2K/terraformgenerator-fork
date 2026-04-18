@@ -48,7 +48,7 @@ public final class BaseSurfaceChunkV3 {
 
     public void replaySurfaceWrites(ChunkGenerator.@NotNull ChunkData chunkData, int localX, int localZ) {
         for (SurfaceBlockWrite write : surfaceWritesByColumn[index(localX, localZ)]) {
-            write.apply(chunkData);
+            write.apply(chunkData, localX, localZ);
         }
     }
 
@@ -60,19 +60,15 @@ public final class BaseSurfaceChunkV3 {
     }
 
     static final class SurfaceBlockWrite {
-        private final byte localX;
         private final short y;
-        private final byte localZ;
         private final @NotNull Material material;
 
-        SurfaceBlockWrite(int localX, int y, int localZ, @NotNull Material material) {
-            this.localX = (byte) localX;
+        SurfaceBlockWrite(int y, @NotNull Material material) {
             this.y = (short) y;
-            this.localZ = (byte) localZ;
             this.material = material;
         }
 
-        private void apply(ChunkGenerator.@NotNull ChunkData chunkData) {
+        private void apply(ChunkGenerator.@NotNull ChunkData chunkData, int localX, int localZ) {
             chunkData.setBlock(localX, y, localZ, material);
         }
     }

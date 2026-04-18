@@ -15,9 +15,7 @@ import org.terraform.data.TerraformWorld;
 import org.terraform.main.config.TConfig;
 import org.terraform.utils.datastructs.ConcurrentLRUCache;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -203,13 +201,11 @@ public final class BaseSurfaceMapStoreV3 {
     }
 
     private static final class SurfaceCaptureChunkData implements ChunkGenerator.ChunkData {
-        private static final int Y_OFFSET = 2048;
-
         private final @NotNull TerraformWorld tw;
         private final int chunkX;
         private final int chunkZ;
         private final short[] rawTerrainHeights;
-        private final HashMap<Integer, Material> blockOverrides = new HashMap<>();
+        private final ColumnOverrideBuffer[] blockOverridesByColumn = new ColumnOverrideBuffer[256];
 
         private SurfaceCaptureChunkData(@NotNull TerraformWorld tw, int chunkX, int chunkZ, short[] rawTerrainHeights) {
             this.tw = tw;
@@ -293,8 +289,8 @@ public final class BaseSurfaceMapStoreV3 {
             if (!isInsideChunk(x, z)) {
                 return Material.AIR;
             }
-            int key = packBlock(x, y, z);
-            Material overridden = blockOverrides.get(key);
+            ColumnOverrideBuffer columnOverrides = blockOverridesByColumn[index(x, z)];
+            Material overridden = columnOverrides == null ? null : columnOverrides.get(y);
             return overridden != null ? overridden : fallbackMaterial(x, y, z);
         }
 
@@ -336,13 +332,20 @@ public final class BaseSurfaceMapStoreV3 {
             if (!isInsideChunk(x, z)) {
                 return;
             }
-            int key = packBlock(x, y, z);
+            int columnIndex = index(x, z);
+            ColumnOverrideBuffer columnOverrides = blockOverridesByColumn[columnIndex];
             Material fallback = fallbackMaterial(x, y, z);
             if (material == fallback) {
-                blockOverrides.remove(key);
+                if (columnOverrides != null && columnOverrides.remove(y) && columnOverrides.isEmpty()) {
+                    blockOverridesByColumn[columnIndex] = null;
+                }
             }
             else {
-                blockOverrides.put(key, material);
+                if (columnOverrides == null) {
+                    columnOverrides = new ColumnOverrideBuffer();
+                    blockOverridesByColumn[columnIndex] = columnOverrides;
+                }
+                columnOverrides.put(y, material);
             }
         }
 
@@ -359,31 +362,12 @@ public final class BaseSurfaceMapStoreV3 {
 
         private BaseSurfaceChunkV3.SurfaceBlockWrite[] @NotNull [] toSurfaceWritesByColumn() {
             try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start("cave-v3.surface-chunk.collect-writes")) {
-                @SuppressWarnings("unchecked")
-                ArrayList<BaseSurfaceChunkV3.SurfaceBlockWrite>[] writesByColumn = new ArrayList[256];
-                for (Map.Entry<Integer, Material> entry : blockOverrides.entrySet()) {
-                    int packed = entry.getKey();
-                    int localX = packed & 0xF;
-                    int localZ = (packed >> 4) & 0xF;
-                    int columnIndex = index(localX, localZ);
-                    ArrayList<BaseSurfaceChunkV3.SurfaceBlockWrite> columnWrites = writesByColumn[columnIndex];
-                    if (columnWrites == null) {
-                        columnWrites = new ArrayList<>();
-                        writesByColumn[columnIndex] = columnWrites;
-                    }
-                    columnWrites.add(new BaseSurfaceChunkV3.SurfaceBlockWrite(
-                            packed & 0xF,
-                            decodeY(packed),
-                            (packed >> 4) & 0xF,
-                            entry.getValue()
-                    ));
-                }
                 BaseSurfaceChunkV3.SurfaceBlockWrite[][] result = new BaseSurfaceChunkV3.SurfaceBlockWrite[256][];
                 for (int columnIndex = 0; columnIndex < result.length; columnIndex++) {
-                    ArrayList<BaseSurfaceChunkV3.SurfaceBlockWrite> columnWrites = writesByColumn[columnIndex];
+                    ColumnOverrideBuffer columnWrites = blockOverridesByColumn[columnIndex];
                     result[columnIndex] = columnWrites == null
                                           ? BaseSurfaceChunkV3.NO_WRITES
-                                          : columnWrites.toArray(new BaseSurfaceChunkV3.SurfaceBlockWrite[0]);
+                                          : columnWrites.toSurfaceWrites();
                 }
                 return result;
             }
@@ -393,12 +377,80 @@ public final class BaseSurfaceMapStoreV3 {
             return x >= 0 && x < 16 && z >= 0 && z < 16;
         }
 
-        private int packBlock(int x, int y, int z) {
-            return ((y + Y_OFFSET) << 8) | (z << 4) | x;
-        }
+        private static final class ColumnOverrideBuffer {
+            private short[] ys = new short[4];
+            private Material[] materials = new Material[4];
+            private int size;
 
-        private int decodeY(int packed) {
-            return (packed >> 8) - Y_OFFSET;
+            private @NotNull BaseSurfaceChunkV3.SurfaceBlockWrite[] toSurfaceWrites() {
+                if (size == 0) {
+                    return BaseSurfaceChunkV3.NO_WRITES;
+                }
+
+                BaseSurfaceChunkV3.SurfaceBlockWrite[] writes = new BaseSurfaceChunkV3.SurfaceBlockWrite[size];
+                for (int i = 0; i < size; i++) {
+                    writes[i] = new BaseSurfaceChunkV3.SurfaceBlockWrite(ys[i], materials[i]);
+                }
+                return writes;
+            }
+
+            private Material get(int y) {
+                int index = indexOf(y);
+                return index < 0 ? null : materials[index];
+            }
+
+            private void put(int y, @NotNull Material material) {
+                int index = indexOf(y);
+                if (index >= 0) {
+                    materials[index] = material;
+                    return;
+                }
+
+                ensureCapacity(size + 1);
+                ys[size] = (short) y;
+                materials[size] = material;
+                size++;
+            }
+
+            private boolean remove(int y) {
+                int index = indexOf(y);
+                if (index < 0) {
+                    return false;
+                }
+
+                int lastIndex = size - 1;
+                if (index != lastIndex) {
+                    ys[index] = ys[lastIndex];
+                    materials[index] = materials[lastIndex];
+                }
+                materials[lastIndex] = null;
+                size = lastIndex;
+                return true;
+            }
+
+            private boolean isEmpty() {
+                return size == 0;
+            }
+
+            private int indexOf(int y) {
+                short targetY = (short) y;
+                for (int i = size - 1; i >= 0; i--) {
+                    if (ys[i] == targetY) {
+                        return i;
+                    }
+                }
+                return -1;
+            }
+
+            private void ensureCapacity(int requiredSize) {
+                if (requiredSize <= ys.length) {
+                    return;
+                }
+
+                int newLength = Math.max(requiredSize, ys.length << 1);
+                ys = Arrays.copyOf(ys, newLength);
+                materials = Arrays.copyOf(materials, newLength);
+            }
         }
     }
 }

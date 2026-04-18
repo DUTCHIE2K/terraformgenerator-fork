@@ -38,7 +38,8 @@ public final class DensitySampleContext {
     int tunnelRequiredSmoothedCoreScoreBits;
     float tunnelRequiredSmoothedCore;
     private final float[] tunnelBranchProbeAxisValues = new float[TUNNEL_BRANCH_SLOT_COUNT];
-    private final boolean[] tunnelBranchProbeAxisComputed = new boolean[TUNNEL_BRANCH_SLOT_COUNT];
+    private final int[] tunnelBranchProbeAxisEpochs = new int[TUNNEL_BRANCH_SLOT_COUNT];
+    private int tunnelBranchProbeEpoch = 1;
 
     DensitySampleContext(@NotNull FastNoise warpNoise,
                          @NotNull FastNoise chamberNoise,
@@ -75,7 +76,7 @@ public final class DensitySampleContext {
         tunnelContinuityComputed = false;
         tunnelGeometryUpperBoundComputed = false;
         tunnelRequiredSmoothedCoreComputed = false;
-        Arrays.fill(tunnelBranchProbeAxisComputed, false);
+        advanceTunnelBranchProbeEpoch();
     }
 
     void cacheTunnelContinuity(float continuity) {
@@ -141,7 +142,7 @@ public final class DensitySampleContext {
     }
 
     boolean hasTunnelBranchProbeAxis(int slot) {
-        return tunnelBranchProbeAxisComputed[slot];
+        return tunnelBranchProbeAxisEpochs[slot] == tunnelBranchProbeEpoch;
     }
 
     float getTunnelBranchProbeAxis(int slot) {
@@ -150,6 +151,15 @@ public final class DensitySampleContext {
 
     void cacheTunnelBranchProbeAxis(int slot, float value) {
         tunnelBranchProbeAxisValues[slot] = value;
-        tunnelBranchProbeAxisComputed[slot] = true;
+        tunnelBranchProbeAxisEpochs[slot] = tunnelBranchProbeEpoch;
+    }
+
+    private void advanceTunnelBranchProbeEpoch() {
+        if (tunnelBranchProbeEpoch == Integer.MAX_VALUE) {
+            Arrays.fill(tunnelBranchProbeAxisEpochs, 0);
+            tunnelBranchProbeEpoch = 1;
+            return;
+        }
+        tunnelBranchProbeEpoch++;
     }
 }

@@ -178,53 +178,9 @@ public class TimingsCommand extends TerraCommand {
             }
         }
 
-        long prefillChunks = getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-top-solid-hit")
-                            + getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-top-solid-miss");
-        if (prefillChunks > 0L) {
+        if (hasPrefillSummary(snapshotsByKey)) {
             sender.sendMessage(ChatColor.GRAY + "Prefill Summary:");
-            sender.sendMessage(formatRatioLine(
-                    "prefilled chunk hit",
-                    getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-top-solid-hit"),
-                    prefillChunks
-            ));
-            sender.sendMessage(formatValueLine(
-                    "prefilled full-column hit",
-                    getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-hit")
-            ));
-            sender.sendMessage(formatValueLine(
-                    "prefill air voxels reused",
-                    getCalls(snapshotsByKey, "cave-v3.generate-noise.prefill-air-voxels-reused")
-            ));
-            sender.sendMessage(formatValueLine(
-                    "prefill empty columns",
-                    getCalls(snapshotsByKey, "cave-v3.generate-noise.prefill-empty-column")
-            ));
-            sender.sendMessage(formatValueLine(
-                    "prefill partial columns",
-                    getCalls(snapshotsByKey, "cave-v3.generate-noise.prefill-partial-column")
-            ));
-            sender.sendMessage(formatValueLine(
-                    "buildFilledCache voxels skipped after cutoff",
-                    getCalls(snapshotsByKey, "cave-v3.build-filled-cache.voxels-skipped-after-cutoff")
-            ));
-            long fullColumnScheduled = getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-scheduled");
-            long fullColumnCompleted = getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-completed");
-            if (fullColumnScheduled > 0L || fullColumnCompleted > 0L) {
-                sender.sendMessage(formatValueLine("prefill full-column scheduled", fullColumnScheduled));
-                sender.sendMessage(formatValueLine("prefill full-column completed", fullColumnCompleted));
-            }
-            long fullColumnDowngradedCap = getCalls(
-                    snapshotsByKey,
-                    "cave-v3.prefill-neighbor.full-column-downgraded-cap"
-            );
-            long fullColumnDowngradedStale = getCalls(
-                    snapshotsByKey,
-                    "cave-v3.prefill-neighbor.full-column-downgraded-stale"
-            );
-            if (fullColumnDowngradedCap > 0L || fullColumnDowngradedStale > 0L) {
-                sender.sendMessage(formatValueLine("prefill full-column downgraded cap", fullColumnDowngradedCap));
-                sender.sendMessage(formatValueLine("prefill full-column downgraded stale", fullColumnDowngradedStale));
-            }
+            emitPrefillSummary(sender, snapshotsByKey);
         }
 
         for (CaveV3Profiler.SectionSnapshot snapshot : CaveV3Profiler.snapshot()) {
@@ -397,53 +353,9 @@ public class TimingsCommand extends TerraCommand {
             }
         }
 
-        long prefillChunks = getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-top-solid-hit")
-                            + getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-top-solid-miss");
-        if (prefillChunks > 0L) {
+        if (hasPrefillSummary(snapshotsByKey)) {
             lines.add("[prefill-summary]");
-            lines.add(formatPlainRatioLine(
-                    "prefilled_chunk_hit",
-                    getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-top-solid-hit"),
-                    prefillChunks
-            ));
-            lines.add(formatPlainValueLine(
-                    "prefilled_full_column_hit",
-                    getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-hit")
-            ));
-            lines.add(formatPlainValueLine(
-                    "prefill_air_voxels_reused",
-                    getCalls(snapshotsByKey, "cave-v3.generate-noise.prefill-air-voxels-reused")
-            ));
-            lines.add(formatPlainValueLine(
-                    "prefill_empty_columns",
-                    getCalls(snapshotsByKey, "cave-v3.generate-noise.prefill-empty-column")
-            ));
-            lines.add(formatPlainValueLine(
-                    "prefill_partial_columns",
-                    getCalls(snapshotsByKey, "cave-v3.generate-noise.prefill-partial-column")
-            ));
-            lines.add(formatPlainValueLine(
-                    "build_filled_cache_voxels_skipped_after_cutoff",
-                    getCalls(snapshotsByKey, "cave-v3.build-filled-cache.voxels-skipped-after-cutoff")
-            ));
-            long fullColumnScheduled = getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-scheduled");
-            long fullColumnCompleted = getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-completed");
-            if (fullColumnScheduled > 0L || fullColumnCompleted > 0L) {
-                lines.add(formatPlainValueLine("prefill_full_column_scheduled", fullColumnScheduled));
-                lines.add(formatPlainValueLine("prefill_full_column_completed", fullColumnCompleted));
-            }
-            long fullColumnDowngradedCap = getCalls(
-                    snapshotsByKey,
-                    "cave-v3.prefill-neighbor.full-column-downgraded-cap"
-            );
-            long fullColumnDowngradedStale = getCalls(
-                    snapshotsByKey,
-                    "cave-v3.prefill-neighbor.full-column-downgraded-stale"
-            );
-            if (fullColumnDowngradedCap > 0L || fullColumnDowngradedStale > 0L) {
-                lines.add(formatPlainValueLine("prefill_full_column_downgraded_cap", fullColumnDowngradedCap));
-                lines.add(formatPlainValueLine("prefill_full_column_downgraded_stale", fullColumnDowngradedStale));
-            }
+            appendPlainPrefillSummary(lines, snapshotsByKey);
         }
 
         lines.add("[cave-v3-detail]");
@@ -477,6 +389,226 @@ public class TimingsCommand extends TerraCommand {
     private static long getCalls(@NotNull Map<String, CaveV3Profiler.SectionSnapshot> snapshotsByKey, @NotNull String key) {
         CaveV3Profiler.SectionSnapshot snapshot = snapshotsByKey.get(key);
         return snapshot == null ? 0L : snapshot.calls();
+    }
+
+    private static boolean hasPrefillSummary(@NotNull Map<String, CaveV3Profiler.SectionSnapshot> snapshotsByKey) {
+        return getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-hit") > 0L
+               || getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-miss") > 0L
+               || getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-sync-built") > 0L
+               || getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-snapshot-hit") > 0L
+               || getCalls(snapshotsByKey, "cave-v3.generate-noise.prefill-air-voxels-reused") > 0L
+               || getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-scheduled") > 0L
+               || getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.surface-scheduled") > 0L
+               || getCalls(snapshotsByKey, "cave-v3.build-filled-cache.voxels-skipped-after-cutoff") > 0L;
+    }
+
+    private static void emitPrefillSummary(@NotNull CommandSender sender,
+                                           @NotNull Map<String, CaveV3Profiler.SectionSnapshot> snapshotsByKey)
+    {
+        long fullColumnHits = getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-hit");
+        long fullColumnMisses = getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-miss");
+        long fullColumnRequests = fullColumnHits + fullColumnMisses;
+        if (fullColumnRequests > 0L) {
+            sender.sendMessage(formatRatioLine(
+                    "full-column request hit",
+                    fullColumnHits,
+                    fullColumnRequests
+            ));
+            sender.sendMessage(formatRatioLine(
+                    "full-column request miss",
+                    fullColumnMisses,
+                    fullColumnRequests
+            ));
+        }
+
+        emitValueLineIfPositive(
+                sender,
+                "full-column sync-built",
+                getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-sync-built")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "prefilled snapshot hit",
+                getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-snapshot-hit")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "prefill air voxels reused",
+                getCalls(snapshotsByKey, "cave-v3.generate-noise.prefill-air-voxels-reused")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "buildFilledCache voxels skipped after cutoff",
+                getCalls(snapshotsByKey, "cave-v3.build-filled-cache.voxels-skipped-after-cutoff")
+        );
+
+        emitValueLineIfPositive(
+                sender,
+                "neighbor full-column scheduled",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-scheduled")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "neighbor full-column completed",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-completed")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "neighbor full-column upgraded surface",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-upgraded-surface")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "neighbor full-column upgrade executed",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-upgrade-executed")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "neighbor full-column upgrade cap missed",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-upgrade-cap-missed")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "neighbor full-column downgraded cap",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-downgraded-cap")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "neighbor full-column downgraded stale",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-downgraded-stale")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "neighbor full-column accepted history",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-accepted-history")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "neighbor surface scheduled",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.surface-scheduled")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "neighbor surface completed",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.surface-completed")
+        );
+        emitValueLineIfPositive(
+                sender,
+                "neighbor surface cached",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.skip-surface-cached")
+        );
+    }
+
+    private static void appendPlainPrefillSummary(@NotNull List<String> lines,
+                                                  @NotNull Map<String, CaveV3Profiler.SectionSnapshot> snapshotsByKey)
+    {
+        long fullColumnHits = getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-hit");
+        long fullColumnMisses = getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-miss");
+        long fullColumnRequests = fullColumnHits + fullColumnMisses;
+        if (fullColumnRequests > 0L) {
+            lines.add(formatPlainRatioLine(
+                    "full_column_request_hit",
+                    fullColumnHits,
+                    fullColumnRequests
+            ));
+            lines.add(formatPlainRatioLine(
+                    "full_column_request_miss",
+                    fullColumnMisses,
+                    fullColumnRequests
+            ));
+        }
+
+        appendPlainValueLineIfPositive(
+                lines,
+                "full_column_sync_built",
+                getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-full-column-sync-built")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "prefilled_snapshot_hit",
+                getCalls(snapshotsByKey, "cave-v3.generate-noise.prefilled-snapshot-hit")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "prefill_air_voxels_reused",
+                getCalls(snapshotsByKey, "cave-v3.generate-noise.prefill-air-voxels-reused")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "build_filled_cache_voxels_skipped_after_cutoff",
+                getCalls(snapshotsByKey, "cave-v3.build-filled-cache.voxels-skipped-after-cutoff")
+        );
+
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_full_column_scheduled",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-scheduled")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_full_column_completed",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-completed")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_full_column_upgraded_surface",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-upgraded-surface")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_full_column_upgrade_executed",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-upgrade-executed")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_full_column_upgrade_cap_missed",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-upgrade-cap-missed")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_full_column_downgraded_cap",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-downgraded-cap")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_full_column_downgraded_stale",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-downgraded-stale")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_full_column_accepted_history",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.full-column-accepted-history")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_surface_scheduled",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.surface-scheduled")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_surface_completed",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.surface-completed")
+        );
+        appendPlainValueLineIfPositive(
+                lines,
+                "neighbor_surface_cached",
+                getCalls(snapshotsByKey, "cave-v3.prefill-neighbor.skip-surface-cached")
+        );
+    }
+
+    private static void emitValueLineIfPositive(@NotNull CommandSender sender, @NotNull String label, long value) {
+        if (value > 0L) {
+            sender.sendMessage(formatValueLine(label, value));
+        }
+    }
+
+    private static void appendPlainValueLineIfPositive(@NotNull List<String> lines,
+                                                       @NotNull String label,
+                                                       long value)
+    {
+        if (value > 0L) {
+            lines.add(formatPlainValueLine(label, value));
+        }
     }
 
     private static @NotNull String formatRatioLine(@NotNull String label, long count, long total) {

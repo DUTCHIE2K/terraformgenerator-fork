@@ -1,13 +1,18 @@
 package org.terraform.coregen;
 
+import org.jetbrains.annotations.NotNull;
 import org.terraform.cave.v3.CaveColumnV3;
+import org.terraform.cave.v3.CaveIntervalMetadata;
 import org.terraform.cave.v3.CaveIntervalV3;
 import org.terraform.cave.v3.CaveSnapshotV3;
+import org.terraform.cave.v3.SurfaceConnectivity;
 import org.terraform.biome.BiomeBank;
+import org.terraform.biome.cavepopulators.MasterCavePopulatorDistributor;
 import org.terraform.data.TerraformWorld;
 import org.terraform.main.TerraformGeneratorPlugin;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -16,6 +21,19 @@ import java.util.List;
  * war crime
  */
 public class ChunkCache {
+    public enum PrefillType {
+        NONE,
+        SURFACE,
+        FULL_COLUMN
+    }
+
+    public enum PrefillScheduleResult {
+        FILLED,
+        SCHEDULED,
+        UPGRADED,
+        ALREADY_SCHEDULED
+    }
+
     public final TerraformWorld tw;
     public final int chunkX, chunkZ;
     public static final float CHUNKCACHE_INVAL = TerraformGeneratorPlugin.injector.getMinY() - 1;
@@ -36,7 +54,7 @@ public class ChunkCache {
     float[] yBarrierNoiseCache;
     float[] bottomSealYCache;
     volatile boolean transformedHeightsFilled;
-    volatile boolean prefillScheduled;
+    volatile PrefillType prefillType;
     CompositeV3ChunkPrefill compositeV3ChunkPrefill;
     CaveSnapshotV3 gameplaySnapshotV3;
 
@@ -61,7 +79,7 @@ public class ChunkCache {
         highestGroundCache = new short[256];
         Arrays.fill(highestGroundCache, (short) CHUNKCACHE_INVAL);
         transformedHeightsFilled = false;
-        prefillScheduled = false;
+        prefillType = PrefillType.NONE;
         compositeV3ChunkPrefill = null;
         gameplaySnapshotV3 = null;
 
@@ -115,19 +133,45 @@ public class ChunkCache {
 
     public void markTransformedHeightsFilled() {
         transformedHeightsFilled = true;
-        prefillScheduled = false;
+        prefillType = PrefillType.NONE;
     }
 
-    public boolean tryMarkPrefillScheduled() {
-        if (transformedHeightsFilled || prefillScheduled) {
-            return false;
+    public synchronized PrefillScheduleResult tryScheduleSurfacePrefill() {
+        if (transformedHeightsFilled) {
+            return PrefillScheduleResult.FILLED;
         }
-        prefillScheduled = true;
-        return true;
+        if (prefillType != PrefillType.NONE) {
+            return PrefillScheduleResult.ALREADY_SCHEDULED;
+        }
+        prefillType = PrefillType.SURFACE;
+        return PrefillScheduleResult.SCHEDULED;
+    }
+
+    public synchronized PrefillScheduleResult tryScheduleFullColumnPrefill() {
+        if (transformedHeightsFilled) {
+            return PrefillScheduleResult.FILLED;
+        }
+        if (prefillType == PrefillType.NONE) {
+            prefillType = PrefillType.FULL_COLUMN;
+            return PrefillScheduleResult.SCHEDULED;
+        }
+        if (prefillType == PrefillType.SURFACE) {
+            prefillType = PrefillType.FULL_COLUMN;
+            return PrefillScheduleResult.UPGRADED;
+        }
+        return PrefillScheduleResult.ALREADY_SCHEDULED;
+    }
+
+    public synchronized boolean shouldPromoteSurfacePrefillToFullColumn() {
+        return !transformedHeightsFilled && prefillType == PrefillType.FULL_COLUMN;
+    }
+
+    public synchronized PrefillType getPrefillType() {
+        return prefillType;
     }
 
     public void clearPrefillScheduled() {
-        prefillScheduled = false;
+        prefillType = PrefillType.NONE;
     }
 
     public boolean hasCompositeV3ChunkPrefill() {
@@ -138,7 +182,7 @@ public class ChunkCache {
         return compositeV3ChunkPrefill;
     }
 
-    public void cacheCompositeV3ChunkPrefill(CompositeV3ChunkPrefill prefill) {
+    public synchronized void cacheCompositeV3ChunkPrefill(CompositeV3ChunkPrefill prefill) {
         compositeV3ChunkPrefill = prefill;
     }
 
@@ -230,14 +274,26 @@ public class ChunkCache {
 
     public static final class CompositeV3ChunkPrefill {
         private final CompositeV3ColumnPrefill[] columns;
-        private final CaveColumnV3[] snapshotColumns;
+        private volatile CaveSnapshotV3 snapshot;
 
         public CompositeV3ChunkPrefill(CompositeV3ColumnPrefill[] columns) {
             if (columns.length != 256) {
                 throw new IllegalArgumentException("CompositeV3ChunkPrefill requires exactly 256 columns");
             }
             this.columns = columns;
-            this.snapshotColumns = new CaveColumnV3[256];
+        }
+
+        public CompositeV3ColumnPrefill getColumn(int chunkSubX, int chunkSubZ) {
+            return columns[chunkSubX + 16 * chunkSubZ];
+        }
+
+        public CaveSnapshotV3 toSnapshot(int chunkX, int chunkZ) {
+            CaveSnapshotV3 cachedSnapshot = snapshot;
+            if (cachedSnapshot != null) {
+                return cachedSnapshot;
+            }
+
+            CaveColumnV3[] snapshotColumns = new CaveColumnV3[256];
             for (int i = 0; i < columns.length; i++) {
                 CompositeV3ColumnPrefill column = columns[i];
                 snapshotColumns[i] = new CaveColumnV3(
@@ -246,14 +302,10 @@ public class ChunkCache {
                         column.getCaveIntervals()
                 );
             }
-        }
 
-        public CompositeV3ColumnPrefill getColumn(int chunkSubX, int chunkSubZ) {
-            return columns[chunkSubX + 16 * chunkSubZ];
-        }
-
-        public CaveSnapshotV3 toSnapshot(int chunkX, int chunkZ) {
-            return new CaveSnapshotV3(chunkX, chunkZ, snapshotColumns);
+            CaveSnapshotV3 builtSnapshot = new CaveSnapshotV3(chunkX, chunkZ, snapshotColumns);
+            snapshot = builtSnapshot;
+            return builtSnapshot;
         }
     }
 
@@ -261,17 +313,15 @@ public class ChunkCache {
         private final short baseSurfaceY;
         private final short transformedHeight;
         private final short[] carvedAirRuns;
-        private final List<CaveIntervalV3> caveIntervals;
+        private volatile List<CaveIntervalV3> caveIntervals;
 
         public CompositeV3ColumnPrefill(short baseSurfaceY,
                                         short transformedHeight,
-                                        short[] carvedAirRuns,
-                                        List<CaveIntervalV3> caveIntervals)
+                                        short[] carvedAirRuns)
         {
             this.baseSurfaceY = baseSurfaceY;
             this.transformedHeight = transformedHeight;
             this.carvedAirRuns = carvedAirRuns;
-            this.caveIntervals = List.copyOf(caveIntervals);
         }
 
         public short getBaseSurfaceY() {
@@ -287,7 +337,45 @@ public class ChunkCache {
         }
 
         public List<CaveIntervalV3> getCaveIntervals() {
-            return caveIntervals;
+            List<CaveIntervalV3> cachedIntervals = caveIntervals;
+            if (cachedIntervals != null) {
+                return cachedIntervals;
+            }
+
+            List<CaveIntervalV3> builtIntervals = buildCaveIntervals(transformedHeight, carvedAirRuns);
+            caveIntervals = builtIntervals;
+            return builtIntervals;
+        }
+
+        private static @NotNull List<CaveIntervalV3> buildCaveIntervals(int topSolidY,
+                                                                         short @NotNull [] carvedAirRuns)
+        {
+            if (carvedAirRuns.length == 0) {
+                return List.of();
+            }
+
+            int minY = TerraformGeneratorPlugin.injector.getMinY();
+            ArrayList<CaveIntervalV3> intervals = new ArrayList<>(carvedAirRuns.length / 2);
+            for (int i = 0; i < carvedAirRuns.length; i += 2) {
+                int bottomY = carvedAirRuns[i];
+                int topY = carvedAirRuns[i + 1];
+                if (bottomY <= minY || bottomY > topSolidY) {
+                    continue;
+                }
+
+                int floorSolidY = bottomY - 1;
+                if ((topY - floorSolidY) < MasterCavePopulatorDistributor.AMBIENT_MINIMUM_CAVE_HEIGHT) {
+                    continue;
+                }
+
+                intervals.add(new CaveIntervalV3(
+                        (short) topY,
+                        (short) floorSolidY,
+                        new CaveIntervalMetadata(topY > topSolidY ? SurfaceConnectivity.YES : SurfaceConnectivity.NO)
+                ));
+            }
+
+            return intervals.isEmpty() ? List.of() : List.copyOf(intervals);
         }
     }
 }

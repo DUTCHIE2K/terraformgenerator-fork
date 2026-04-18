@@ -425,6 +425,9 @@ public class TConfig extends YamlFileInterface {
     public int CAVES_DENSITY_V1_BOTTOM_SEAL_FADE_HEIGHT = 5;
     @YamlKey("caves.density-v1.bottom-seal-max-threshold-penalty")
     public float CAVES_DENSITY_V1_BOTTOM_SEAL_MAX_THRESHOLD_PENALTY = 0.25f;
+    @YamlComment("How many heavy Composite V3 full-column cave prefills may run at once. Higher values can improve fresh chunk travel but use more CPU and memory.")
+    @YamlKey("caves.composite-v3.full-column-prefill-concurrency")
+    public int CAVES_COMPOSITE_V3_FULL_COLUMN_PREFILL_CONCURRENCY = 3;
     // CAVES_ALLOW_FLOODED_RAVINES("caves.allow-flooded-ravines",true),
 
     // -=[STRUCTURES]=-

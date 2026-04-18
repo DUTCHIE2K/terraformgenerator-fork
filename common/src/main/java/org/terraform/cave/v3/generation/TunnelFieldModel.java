@@ -24,6 +24,8 @@ final class TunnelFieldModel {
     private static final String FULL_THRESHOLD_HIT_PROFILER_KEY = "cave-v3.sample.field.tunnel.full-threshold-hit";
     private static final String FULL_THRESHOLD_FALSE_POSITIVE_PROFILER_KEY =
             "cave-v3.sample.field.tunnel.full-threshold-false-positive";
+    private static final String FULL_REMAINING_MAX_STOP_PROFILER_KEY =
+            "cave-v3.sample.field.tunnel.full-remaining-max-stop";
     private static final String PROBE_GEOMETRY_PROFILER_KEY = "cave-v3.sample.field.tunnel.probe.geometry";
     private static final String PROBE_PRESUPPORT_PRUNED_PROFILER_KEY =
             "cave-v3.sample.field.tunnel.probe.pre-support-pruned";
@@ -34,6 +36,8 @@ final class TunnelFieldModel {
             "cave-v3.sample.field.tunnel.probe.geometry-threshold-hit";
     private static final String PROBE_GEOMETRY_FULL_BOUND_PROFILER_KEY =
             "cave-v3.sample.field.tunnel.probe.geometry-full-bound";
+    private static final String PROBE_GEOMETRY_REMAINING_MAX_STOP_PROFILER_KEY =
+            "cave-v3.sample.field.tunnel.probe.geometry-remaining-max-stop";
     private static final int SUPPORTED_BRANCH_SLOT_COUNT = 10;
     private static final int MAX_VERIFIER_MISMATCH_LOGS = 16;
     private static final long VERIFIER_SUCCESS_LOG_INTERVAL_MILLIS = 5000L;
@@ -42,10 +46,17 @@ final class TunnelFieldModel {
     private static final AtomicLong LAST_VERIFIER_SUCCESS_LOG_MILLIS = new AtomicLong(System.currentTimeMillis());
 
     private final @NotNull Params params;
+    private final int[] clearanceOrder;
+    private final float[] remainingClearanceMaxContributions;
 
     TunnelFieldModel(@NotNull Params params) {
         this.params = params;
         validateParams(params);
+        this.clearanceOrder = createClearanceOrder(params.clearances().length);
+        this.remainingClearanceMaxContributions = computeRemainingClearanceMaxContributions(
+                params.clearances(),
+                clearanceOrder
+        );
     }
 
     static @NotNull TunnelFieldModel createDefault() {
@@ -692,9 +703,6 @@ final class TunnelFieldModel {
                                               float minRelevantLocalScore)
     {
         ensureTunnelProbe(noiseSet, context);
-        float requiredSmoothedCore = Float.isFinite(minRelevantLocalScore)
-                                     ? getRequiredSmoothedTunnelCore(context, minRelevantLocalScore)
-                                     : Float.POSITIVE_INFINITY;
         float requiredStableSmoothedCore = Float.isFinite(minRelevantLocalScore)
                                            ? computeRequiredSmoothedTunnelCore(
                                                    context,
@@ -705,19 +713,24 @@ final class TunnelFieldModel {
         float tunnelCore = 0f;
         int clearancesEntered = 0;
         ClearanceShape[] clearances = params.clearances();
-        for (int clearanceIndex = 0; clearanceIndex < clearances.length; clearanceIndex++) {
+        for (int orderIndex = 0; orderIndex < clearanceOrder.length; orderIndex++) {
+            int clearanceIndex = clearanceOrder[orderIndex];
             ClearanceShape clearance = clearances[clearanceIndex];
             boolean clearanceEntered = canClearanceImprove(clearance.clearanceWeight(), tunnelCore);
-            tunnelCore = sampleTunnelClearanceContribution(noiseSet, context, tunnelCore, clearanceIndex, clearance);
+            float updatedTunnelCore = sampleTunnelClearanceContribution(noiseSet, context, tunnelCore, clearanceIndex, clearance);
             if (clearanceEntered) {
                 clearancesEntered++;
             }
+            tunnelCore = updatedTunnelCore;
 
-            if (Float.isFinite(requiredSmoothedCore) && smoothTunnelCore(tunnelCore) >= requiredSmoothedCore) {
-                float localScore = getTunnelLocalScoreForCore(context, tunnelCore);
-                if (localScore >= minRelevantLocalScore
-                    && smoothTunnelCore(tunnelCore) >= requiredStableSmoothedCore)
-                {
+            float localScore = 0f;
+            boolean localScoreComputed = false;
+            if (Float.isFinite(requiredStableSmoothedCore)
+                && smoothTunnelCore(tunnelCore) >= requiredStableSmoothedCore)
+            {
+                localScore = getTunnelLocalScoreForCore(context, tunnelCore);
+                localScoreComputed = true;
+                if (localScore >= minRelevantLocalScore) {
                     // DensityFieldScore has a soft band just below the carve threshold. Scores in that
                     // band can temporarily exceed the threshold and then dip when later clearances push
                     // density onto the post-threshold branch, so only the monotonic branch is safe to
@@ -726,6 +739,16 @@ final class TunnelFieldModel {
                     return localScore;
                 }
                 CaveV3Profiler.recordEvent(FULL_THRESHOLD_FALSE_POSITIVE_PROFILER_KEY);
+            }
+
+            if ((orderIndex + 1) < clearanceOrder.length
+                && tunnelCore >= remainingClearanceMaxContributions[orderIndex + 1])
+            {
+                if (!localScoreComputed) {
+                    localScore = getTunnelLocalScoreForCore(context, tunnelCore);
+                }
+                CaveV3Profiler.recordEvent(FULL_REMAINING_MAX_STOP_PROFILER_KEY);
+                return localScore;
             }
         }
 
@@ -851,14 +874,26 @@ final class TunnelFieldModel {
         try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start(PROBE_GEOMETRY_PROFILER_KEY)) {
             float tunnelCoreUpperBound = 0f;
             ClearanceShape[] clearances = params.clearances();
-            for (int clearanceIndex = 0; clearanceIndex < clearances.length; clearanceIndex++) {
-                tunnelCoreUpperBound = Math.max(
+            for (int orderIndex = 0; orderIndex < clearanceOrder.length; orderIndex++) {
+                int clearanceIndex = clearanceOrder[orderIndex];
+                float updatedUpperBound = sampleTunnelClearanceUpperBound(
+                        noiseSet,
+                        context,
                         tunnelCoreUpperBound,
-                        sampleTunnelClearanceUpperBound(noiseSet, context, tunnelCoreUpperBound, clearanceIndex, clearances[clearanceIndex])
+                        clearanceIndex,
+                        clearances[clearanceIndex]
                 );
+                tunnelCoreUpperBound = updatedUpperBound;
                 if (smoothTunnelCore(tunnelCoreUpperBound) >= requiredSmoothedCore) {
                     CaveV3Profiler.recordEvent(PROBE_GEOMETRY_THRESHOLD_HIT_PROFILER_KEY);
                     return true;
+                }
+                if ((orderIndex + 1) < clearanceOrder.length
+                    && tunnelCoreUpperBound >= remainingClearanceMaxContributions[orderIndex + 1])
+                {
+                    context.cacheTunnelGeometryUpperBound(tunnelCoreUpperBound);
+                    CaveV3Profiler.recordEvent(PROBE_GEOMETRY_REMAINING_MAX_STOP_PROFILER_KEY);
+                    return false;
                 }
             }
             context.cacheTunnelGeometryUpperBound(tunnelCoreUpperBound);
@@ -875,11 +910,23 @@ final class TunnelFieldModel {
         float tunnelCoreUpperBound = 0f;
         try (CaveV3Profiler.Scope ignored = CaveV3Profiler.start(PROBE_GEOMETRY_PROFILER_KEY)) {
             ClearanceShape[] clearances = params.clearances();
-            for (int clearanceIndex = 0; clearanceIndex < clearances.length; clearanceIndex++) {
-                tunnelCoreUpperBound = Math.max(
+            for (int orderIndex = 0; orderIndex < clearanceOrder.length; orderIndex++) {
+                int clearanceIndex = clearanceOrder[orderIndex];
+                float updatedUpperBound = sampleTunnelClearanceUpperBound(
+                        noiseSet,
+                        context,
                         tunnelCoreUpperBound,
-                        sampleTunnelClearanceUpperBound(noiseSet, context, tunnelCoreUpperBound, clearanceIndex, clearances[clearanceIndex])
+                        clearanceIndex,
+                        clearances[clearanceIndex]
                 );
+                tunnelCoreUpperBound = updatedUpperBound;
+                if ((orderIndex + 1) < clearanceOrder.length
+                    && tunnelCoreUpperBound >= remainingClearanceMaxContributions[orderIndex + 1])
+                {
+                    context.cacheTunnelGeometryUpperBound(tunnelCoreUpperBound);
+                    CaveV3Profiler.recordEvent(PROBE_GEOMETRY_REMAINING_MAX_STOP_PROFILER_KEY);
+                    return tunnelCoreUpperBound;
+                }
             }
         }
         context.cacheTunnelGeometryUpperBound(tunnelCoreUpperBound);
@@ -1257,6 +1304,39 @@ final class TunnelFieldModel {
         return clearanceWeight > currentBestContribution;
     }
 
+    private static int[] createClearanceOrder(int clearanceCount) {
+        int[] order = new int[clearanceCount];
+        for (int i = 0; i < clearanceCount; i++) {
+            order[i] = i;
+        }
+        if (clearanceCount >= 5) {
+            order[3] = 4;
+            order[4] = 3;
+        }
+        return order;
+    }
+
+    private static float[] computeRemainingClearanceMaxContributions(@NotNull ClearanceShape[] clearances,
+                                                                     int @NotNull [] clearanceOrder)
+    {
+        float[] suffixMaxContributions = new float[clearanceOrder.length + 1];
+        for (int i = clearanceOrder.length - 1; i >= 0; i--) {
+            suffixMaxContributions[i] = Math.max(
+                    getMaxPossibleClearanceContribution(clearances[clearanceOrder[i]]),
+                    suffixMaxContributions[i + 1]
+            );
+        }
+        return suffixMaxContributions;
+    }
+
+    private static float getMaxPossibleClearanceContribution(@NotNull ClearanceShape clearance) {
+        float maxBranchWeight = Math.max(
+                clearance.primaryBranch().branchWeight(),
+                clearance.secondaryBranch().branchWeight()
+        );
+        return clearance.clearanceWeight() * maxBranchWeight;
+    }
+
     private static float getTunnelBranchProbeAxis(@NotNull NoiseSet noiseSet,
                                                   @NotNull DensitySampleContext context,
                                                   @NotNull BranchShape branch,
@@ -1298,7 +1378,10 @@ final class TunnelFieldModel {
     private static float getSingleAxisMaskUpperBound(float axis, float width) {
         float safeWidth = Math.max(0.0001f, width);
         float radialLowerBound = Math.abs(axis) / safeWidth;
-        float mask = 1f - DensityCarveRules.clamp01(radialLowerBound);
+        if (radialLowerBound >= 1f) {
+            return 0f;
+        }
+        float mask = 1f - radialLowerBound;
         return mask * mask * (3f - (2f * mask));
     }
 
@@ -1307,8 +1390,12 @@ final class TunnelFieldModel {
         float safeWidthB = Math.max(0.0001f, widthB);
         float normalizedA = axisA / safeWidthA;
         float normalizedB = axisB / safeWidthB;
-        float radialDistance = (float) Math.sqrt((normalizedA * normalizedA) + (normalizedB * normalizedB));
-        float mask = 1f - DensityCarveRules.clamp01(radialDistance);
+        float radialDistanceSquared = (normalizedA * normalizedA) + (normalizedB * normalizedB);
+        if (radialDistanceSquared >= 1f) {
+            return 0f;
+        }
+        float radialDistance = (float) Math.sqrt(radialDistanceSquared);
+        float mask = 1f - radialDistance;
         return mask * mask * (3f - (2f * mask));
     }
 
