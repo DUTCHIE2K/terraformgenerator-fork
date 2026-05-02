@@ -14,8 +14,8 @@ import org.terraform.structure.JigsawStructurePopulator;
 import org.terraform.structure.room.CubeRoom;
 import org.terraform.structure.room.RoomLayout;
 import org.terraform.structure.room.RoomLayoutGenerator;
-import org.terraform.structure.room.carver.CaveRoomCarver;
-import org.terraform.structure.room.path.CavePathWriter;
+import org.terraform.structure.room.carver.StructureCaveRoomCarver;
+import org.terraform.structure.room.path.StructureCavePathWriter;
 import org.terraform.structure.room.path.PathState;
 import org.terraform.utils.GenUtils;
 
@@ -126,10 +126,10 @@ public class MineshaftPopulator extends JigsawStructurePopulator {
         }
 
         gen.wallMaterials = new Material[] {Material.CAVE_AIR};
-        gen.roomCarver = new CaveRoomCarver();
+        gen.roomCarver = new StructureCaveRoomCarver();
         gen.calculateRoomPlacement();
         PathState ps = gen.getOrCalculatePathState(tw);
-        ps.writer = new CavePathWriter(0f, 1f, 0f, 0, 1, 0);
+        ps.writer = new StructureCavePathWriter(0f, 1f, 0f, 0, 1, 0);
         gen.calculateRoomPopulators(tw);
         state.roomPopulatorStates.add(gen);
         // gen.fill(data, tw, Material.CAVE_AIR);
@@ -181,10 +181,10 @@ public class MineshaftPopulator extends JigsawStructurePopulator {
             ));
 
             secondGen.wallMaterials = new Material[] {Material.CAVE_AIR};
-            secondGen.roomCarver = new CaveRoomCarver();
+            secondGen.roomCarver = new StructureCaveRoomCarver();
             secondGen.calculateRoomPlacement();
             ps = secondGen.getOrCalculatePathState(tw);
-            ps.writer = new CavePathWriter(0f, 1f, 0f, 0, 1, 0);
+            ps.writer = new StructureCavePathWriter(0f, 1f, 0f, 0, 1, 0);
             secondGen.calculateRoomPopulators(tw);
             state.roomPopulatorStates.add(secondGen);
             // secondGen.fill(data, tw, Material.CAVE_AIR);

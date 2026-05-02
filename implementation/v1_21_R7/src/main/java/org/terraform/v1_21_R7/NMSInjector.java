@@ -2,6 +2,7 @@ package org.terraform.v1_21_R7;
 
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.WorldGenLevel;
 import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
 import net.minecraft.world.level.chunk.ChunkGenerator;
@@ -17,6 +18,8 @@ import org.bukkit.craftbukkit.block.CraftBlockEntityState;
 import org.bukkit.craftbukkit.generator.CraftLimitedRegion;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.terraform.cave.v3.CaveSamplerBridge;
+import org.terraform.cave.v3.CaveSettings;
 import org.terraform.coregen.BlockDataFixerAbstract;
 import org.terraform.coregen.NMSInjectorAbstract;
 import org.terraform.coregen.populatordata.PopulatorDataAbstract;
@@ -164,6 +167,22 @@ public class NMSInjector extends NMSInjectorAbstract {
     @Override
     public int getMaxY() {
         return 320;
+    }
+
+    @Override
+    public void markChunkDataForFluidPostProcessing(org.bukkit.generator.ChunkGenerator.ChunkData chunkData,
+                                                    int rawX,
+                                                    int y,
+                                                    int rawZ) {
+        if (chunkData instanceof org.bukkit.craftbukkit.generator.CraftChunkData craftChunkData) {
+            craftChunkData.getHandle().markPosForPostprocessing(new BlockPos(rawX, y, rawZ));
+        }
+    }
+
+    @Override
+    public @NotNull CaveSamplerBridge createCaveSamplerBridge(@NotNull TerraformWorld tw,
+                                                              @NotNull CaveSettings settings) {
+        return new CaveSamplerBridgeImpl(tw, settings);
     }
 
 }

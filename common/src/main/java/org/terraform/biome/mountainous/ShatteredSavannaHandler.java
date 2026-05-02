@@ -41,6 +41,45 @@ public class ShatteredSavannaHandler extends AbstractMountainHandler {
 
     static BiomeBlender biomeBlender;
 
+    private static @NotNull FastNoise getCreviceNoise(@NotNull TerraformWorld tw) {
+        return NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_SHATTERED_SAVANNANOISE, world -> {
+            FastNoise n = new FastNoise(tw.getHashedRand(181234, 32189, 16342134).nextInt());
+            n.SetNoiseType(NoiseType.SimplexFractal);
+            n.SetFractalType(FastNoise.FractalType.Billow);
+            n.SetFractalOctaves(1);
+            n.SetFrequency(0.02f);
+            return n;
+        });
+    }
+
+    private static @NotNull FastNoise getYScaleNoise(@NotNull TerraformWorld tw) {
+        return NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_SHATTERED_SAVANNANOISE, world -> {
+            FastNoise n = new FastNoise(tw.getHashedRand(982374, 18723, 1983701).nextInt());
+            n.SetNoiseType(NoiseType.Simplex);
+            n.SetFrequency(0.06f);
+            return n;
+        });
+    }
+
+    public static int getApproximateTopSolidY(@NotNull TerraformWorld tw, int rawX, int rawZ, int baseHeight) {
+        double crevice = Math.abs(getCreviceNoise(tw).GetNoise(rawX, rawZ));
+        if (crevice < 0.4f) {
+            return baseHeight;
+        }
+
+        FastNoise yScaleNoise = getYScaleNoise(tw);
+        int low = Math.max((int) HeightMap.CORE.getHeight(tw, rawX, rawZ), TerraformGenerator.seaLevel + 1);
+        int topSolidY = baseHeight;
+        for (int y = baseHeight; y > low; y--) {
+            double scale = 1f - 0.4 * Math.abs(yScaleNoise.GetNoise(y, 0));
+            if (crevice * scale < 0.4f) {
+                break;
+            }
+            topSolidY = y - 1;
+        }
+        return topSolidY;
+    }
+
     private static @NotNull BiomeBlender getBiomeBlender(TerraformWorld tw) {
         if (biomeBlender == null) {
             biomeBlender = new BiomeBlender(tw, true, true).setGridBlendingFactor(4).setSmoothBlendTowardsRivers(2);
@@ -88,21 +127,8 @@ public class ShatteredSavannaHandler extends AbstractMountainHandler {
                                  int chunkX,
                                  int chunkZ)
     {
-
-        FastNoise creviceNoise = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_SHATTERED_SAVANNANOISE, world -> {
-            FastNoise n = new FastNoise(tw.getHashedRand(181234, 32189, 16342134).nextInt());
-            n.SetNoiseType(NoiseType.SimplexFractal);
-            n.SetFractalType(FastNoise.FractalType.Billow);
-            n.SetFractalOctaves(1);
-            n.SetFrequency(0.02f);
-            return n;
-        });
-        FastNoise yScaleNoise = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_SHATTERED_SAVANNANOISE, world -> {
-            FastNoise n = new FastNoise(tw.getHashedRand(982374, 18723, 1983701).nextInt());
-            n.SetNoiseType(NoiseType.Simplex);
-            n.SetFrequency(0.06f);
-            return n;
-        });
+        FastNoise creviceNoise = getCreviceNoise(tw);
+        FastNoise yScaleNoise = getYScaleNoise(tw);
         int rawX = chunkX * 16 + x;
         int rawZ = chunkZ * 16 + z;
         double crevice = Math.abs(creviceNoise.GetNoise(rawX, rawZ));

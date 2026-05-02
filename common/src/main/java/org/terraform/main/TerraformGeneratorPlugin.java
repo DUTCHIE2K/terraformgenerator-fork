@@ -11,7 +11,6 @@ import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
-import org.terraform.cave.v3.BaseSurfaceMapStoreV3;
 import org.terraform.cave.v3.CaveSnapshotStoreV3;
 import org.terraform.coregen.ChunkCache;
 import org.terraform.coregen.HeightMap;
@@ -144,10 +143,12 @@ public class TerraformGeneratorPlugin extends JavaPlugin implements Listener {
         new TerraformGeneratorMetricsHandler(this); // bStats
 
         TerraformGenerator.updateSeaLevelFromConfig();
-        logger.stdout("Cave generator mode: " + TConfig.c.CAVES_GENERATOR_MODE + " (chamber baseline)");
+        logger.stdout("Cave generator: vanilla-feel");
         new TerraformCommandManager(this, "terraform", "terra");
         Bukkit.getPluginManager().registerEvents(this, this);
-        Bukkit.getPluginManager().registerEvents(new SchematicListener(), this);
+        if (TConfig.c.DEVSTUFF_EXTENDED_COMMANDS) {
+            Bukkit.getPluginManager().registerEvents(new SchematicListener(), this);
+        }
         String version = Version.VERSION.getPackName();
         logger.stdout("Detected version: " + version + ", packName: " + Version.VERSION.getPackName());
         try {
@@ -252,7 +253,6 @@ public class TerraformGeneratorPlugin extends JavaPlugin implements Listener {
             NoiseCacheHandler.flushNoiseCaches(tw);
             tw.clearTransientGenerationCaches();
             CaveSnapshotStoreV3.clearWorld(tw);
-            BaseSurfaceMapStoreV3.clearWorld(tw);
         }
     }
 

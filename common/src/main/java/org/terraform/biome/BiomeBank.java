@@ -361,7 +361,8 @@ public enum BiomeBank {
             250,
             (key)->{key.doCalculations(); return key; }
     );
-    // public static final BiomeBank[] VALUES = values();
+    private static final BiomeBank[] VALUES = values();
+    private static final BiomeSelectionPool[][] BIOME_SELECTION_POOLS = createSelectionPools();
     public static boolean debugPrint = false;
     public static @Nullable BiomeBank singleLand = null;
     public static @Nullable BiomeBank singleOcean = null;
@@ -527,27 +528,12 @@ public enum BiomeBank {
             if (debugPrint) {
                 TerraformGeneratorPlugin.logger.info("calculateBiome -> Submerged biome above ground detected");
             }
+            BiomeSection homeSection = BiomeBank.getBiomeSectionFromBlockCoords(tw, rawX, rawZ);
             BiomeBank replacement = null;
 
             // If the ocean handler wants to force a beach default, it will be a beach default.
             if (!bank.getHandler().forceDefaultToBeach()) {
-                int highestDom = Integer.MIN_VALUE;
-                for (BiomeSection sect : BiomeSection.getSurroundingSections(tw, rawX, rawZ)) {
-                    if (debugPrint) {
-                        TerraformGeneratorPlugin.logger.info("calculateBiome -> -> Comparison Section: "
-                                                             + sect.toString());
-                    }
-                    if (sect.getBiomeBank().isDry()) {
-                        int compDist = (int) sect.getDominanceBasedOnRadius(rawX, rawZ);
-                        if (debugPrint) {
-                            TerraformGeneratorPlugin.logger.info("calculateBiome -> -> -> Dominance: " + compDist);
-                        }
-                        if (compDist > highestDom) {
-                            replacement = sect.getBiomeBank();
-                            highestDom = compDist;
-                        }
-                    }
-                }
+                replacement = findDominantDryReplacement(homeSection, rawX, rawZ);
             }
 
             // Fallback to beach if surrounding biomes are not dry
@@ -564,6 +550,62 @@ public enum BiomeBank {
         }
 
         return bank;
+    }
+
+    private static @Nullable BiomeBank findDominantDryReplacement(@NotNull BiomeSection homeSection, int rawX, int rawZ) {
+        int relativeX = rawX >= homeSection.getCenter().getX() ? 1 : -1;
+        int relativeZ = rawZ >= homeSection.getCenter().getZ() ? 1 : -1;
+        BiomeBank replacement = null;
+        int highestDominance = Integer.MIN_VALUE;
+
+        highestDominance = tryDominantDryReplacement(homeSection, rawX, rawZ, highestDominance);
+        if (highestDominance != Integer.MIN_VALUE) {
+            replacement = homeSection.getBiomeBank();
+        }
+
+        BiomeSection candidate = homeSection.getRelative(relativeX, 0);
+        int candidateDominance = tryDominantDryReplacement(candidate, rawX, rawZ, highestDominance);
+        if (candidateDominance > highestDominance) {
+            replacement = candidate.getBiomeBank();
+            highestDominance = candidateDominance;
+        }
+
+        candidate = homeSection.getRelative(relativeX, relativeZ);
+        candidateDominance = tryDominantDryReplacement(candidate, rawX, rawZ, highestDominance);
+        if (candidateDominance > highestDominance) {
+            replacement = candidate.getBiomeBank();
+            highestDominance = candidateDominance;
+        }
+
+        candidate = homeSection.getRelative(0, relativeZ);
+        candidateDominance = tryDominantDryReplacement(candidate, rawX, rawZ, highestDominance);
+        if (candidateDominance > highestDominance) {
+            replacement = candidate.getBiomeBank();
+        }
+
+        return replacement;
+    }
+
+    private static int tryDominantDryReplacement(@NotNull BiomeSection section,
+                                                 int rawX,
+                                                 int rawZ,
+                                                 int currentHighestDominance)
+    {
+        if (debugPrint) {
+            TerraformGeneratorPlugin.logger.info("calculateBiome -> -> Comparison Section: " + section);
+        }
+
+        BiomeBank sectionBiome = section.getBiomeBank();
+        if (!sectionBiome.isDry()) {
+            return currentHighestDominance;
+        }
+
+        int dominance = (int) section.getDominanceBasedOnRadius(rawX, rawZ);
+        if (debugPrint) {
+            TerraformGeneratorPlugin.logger.info("calculateBiome -> -> -> Dominance: " + dominance);
+        }
+
+        return Math.max(currentHighestDominance, dominance);
     }
 
     /**
@@ -653,8 +695,10 @@ public enum BiomeBank {
      * Used to get a biomebank from temperature and moisture values.
      */
     public static @NotNull BiomeBank selectBiome(@NotNull BiomeSection section, double temperature, double moisture) {
-        Random sectionRand = section.getSectionRandom();
+        return selectBiome(section, BiomeClimate.selectClimate(temperature, moisture));
+    }
 
+    static @NotNull BiomeBank selectBiome(@NotNull BiomeSection section, @NotNull BiomeClimate climate) {
         if(TConfig.c.BIOME_FORCE_RADIUS > 0){
             CoordPair lowerZoneBound = new CoordPair(
                     (-TConfig.c.BIOME_FORCE_RADIUS)>>BiomeSection.bitshifts,
@@ -671,7 +715,6 @@ public enum BiomeBank {
             }
         }
         BiomeType targetType = BiomeType.FLAT;
-        BiomeClimate climate = BiomeClimate.selectClimate(temperature, moisture);
 
         double oceanicNoise = section.getOceanLevel();
         if (oceanicNoise < 0 || TConfig.c.BIOME_OCEANIC_THRESHOLD < 0) {
@@ -706,27 +749,12 @@ public enum BiomeBank {
             case HIGH_MOUNTAINOUS -> { if(singleHighMountain != null) return singleHighMountain; }
         }
 
-        ArrayList<BiomeBank> contenders = new ArrayList<>();
-        for (BiomeBank biome : BiomeBank.values()) {
-            //Excludes beaches and rivers
-            if (biome.biomeWeight <= 0)
-                continue;
-            if (biome.getType() != targetType)
-                continue;
-            if (biome.climate == climate) {
-                for (int i = 0; i < biome.biomeWeight; i++) {
-                    contenders.add(biome);
-                }
-            }
-        }
-
-        Collections.shuffle(contenders, sectionRand);
-
-        if (contenders.isEmpty()) {
+        BiomeSelectionPool pool = BIOME_SELECTION_POOLS[targetType.ordinal()][climate.ordinal()];
+        if (pool.isEmpty()) {
             TerraformGeneratorPlugin.logger.info("Defaulted for: "
-                                                 + temperature
+                                                 + section.getTemperature()
                                                  + " : "
-                                                 + moisture
+                                                 + section.getMoisture()
                                                  + ","
                                                  + climate
                                                  + ":"
@@ -741,9 +769,7 @@ public enum BiomeBank {
                 case HIGH_MOUNTAINOUS -> BiomeBank.valueOf(TConfig.c.BIOME_DEFAULT_HIGHMOUNTAINOUS);
             };
         }
-        else {
-            return contenders.get(0);
-        }
+        return pool.pickWeighted(section.getSectionRandom());
     }
 
     /**
@@ -775,5 +801,69 @@ public enum BiomeBank {
 
     public boolean isDry() {
         return getType().isDry();
+    }
+
+    private static @NotNull BiomeSelectionPool[][] createSelectionPools() {
+        BiomeType[] types = BiomeType.values();
+        BiomeClimate[] climates = BiomeClimate.values();
+        BiomeSelectionPool[][] pools = new BiomeSelectionPool[types.length][climates.length];
+
+        for (BiomeType type : types) {
+            for (BiomeClimate climate : climates) {
+                pools[type.ordinal()][climate.ordinal()] = createSelectionPool(type, climate);
+            }
+        }
+
+        return pools;
+    }
+
+    private static @NotNull BiomeSelectionPool createSelectionPool(@NotNull BiomeType type,
+                                                                   @NotNull BiomeClimate climate)
+    {
+        int size = 0;
+        for (BiomeBank biome : VALUES) {
+            if (biome.biomeWeight > 0 && biome.getType() == type && biome.climate == climate) {
+                size += biome.biomeWeight;
+            }
+        }
+
+        if (size == 0) {
+            return BiomeSelectionPool.EMPTY;
+        }
+
+        BiomeBank[] weightedBiomes = new BiomeBank[size];
+        int index = 0;
+        for (BiomeBank biome : VALUES) {
+            if (biome.biomeWeight <= 0 || biome.getType() != type || biome.climate != climate) {
+                continue;
+            }
+
+            for (int i = 0; i < biome.biomeWeight; i++) {
+                weightedBiomes[index++] = biome;
+            }
+        }
+
+        return new BiomeSelectionPool(weightedBiomes);
+    }
+
+    private static final class BiomeSelectionPool {
+        private static final BiomeSelectionPool EMPTY = new BiomeSelectionPool(new BiomeBank[0]);
+
+        private final BiomeBank[] weightedBiomes;
+
+        private BiomeSelectionPool(BiomeBank[] weightedBiomes) {
+            this.weightedBiomes = weightedBiomes;
+        }
+
+        private boolean isEmpty() {
+            return weightedBiomes.length == 0;
+        }
+
+        private @NotNull BiomeBank pickWeighted(@NotNull Random rand) {
+            if (weightedBiomes.length == 1) {
+                return weightedBiomes[0];
+            }
+            return weightedBiomes[rand.nextInt(weightedBiomes.length)];
+        }
     }
 }

@@ -25,6 +25,16 @@ import org.terraform.utils.noise.NoiseCacheHandler.NoiseCacheEntry;
 import java.util.Random;
 
 public class GorgeHandler extends BiomeHandler {
+    private static final Material[] GORGE_RAISE_MATERIALS = new Material[] {
+            Material.STONE,
+            Material.STONE,
+            Material.STONE,
+            Material.STONE,
+            Material.COBBLESTONE,
+            Material.COBBLESTONE,
+            Material.ANDESITE,
+            Material.ANDESITE
+    };
     static final BiomeHandler plainsHandler = BiomeBank.PLAINS.getHandler();
     static final boolean slabs = TConfig.c.MISC_USE_SLABS_TO_SMOOTH;
     static BiomeBlender biomeBlender;
@@ -126,105 +136,130 @@ public class GorgeHandler extends BiomeHandler {
                                  int chunkX,
                                  int chunkZ)
     {
+        int rawX = chunkX * 16 + x;
+        int rawZ = chunkZ * 16 + z;
 
-        FastNoise cliffNoise = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_GORGE_CLIFFNOISE, world -> {
+        double preciseHeight = HeightMap.getPreciseHeight(tw, rawX, rawZ);
+        GorgeColumnTransform transform = sampleTransform(tw, random, (int) preciseHeight, rawX, rawZ);
+        if (transform.raiseHeight() > 0) {
+            cache.writeTransformedHeight(x, z, (short) (transform.raiseHeight() + (int) preciseHeight));
+            for (int y = 1; y <= transform.raiseHeight(); y++) {
+                chunk.setBlock(x, (int) preciseHeight + y, z, transform.addedTopShellMaterials()[y - 1]);
+            }
+        }
+        else if (transform.trimDepth() > 0) {
+            int height = (int) preciseHeight;
+            cache.writeTransformedHeight(x, z, (short) (height - transform.trimDepth()));
+            for (int y = 0; y < transform.trimDepth(); y++) {
+                int targetY = height - y;
+                chunk.setBlock(
+                        x,
+                        targetY,
+                        z,
+                        targetY <= transform.removedTopWaterlineY() ? Material.WATER : Material.AIR
+                );
+            }
+
+            if (height - transform.trimDepth() <= transform.removedTopWaterlineY()) {
+                chunk.setBlock(x, height - transform.trimDepth(), z, Material.STONE);
+            }
+        }
+    }
+
+    public static @NotNull GorgeColumnTransform sampleTransform(@NotNull TerraformWorld tw,
+                                                                @NotNull Random random,
+                                                                int baseHeight,
+                                                                int rawX,
+                                                                int rawZ)
+    {
+        double threshold = 0.1;
+        int heightFactor = 12;
+
+        FastNoise cliffNoise = getCliffNoise(tw);
+        FastNoise detailsNoise = getDetailsNoise(tw);
+
+        double edgeFactor = getBiomeBlender(tw).getEdgeFactor(BiomeBank.GORGE, rawX, rawZ);
+        double rawCliffNoiseVal = cliffNoise.GetNoise(rawX, rawZ);
+        double noiseValue = rawCliffNoiseVal * edgeFactor;
+        double detailsValue = detailsNoise.GetNoise(rawX, rawZ);
+
+        if (noiseValue >= 0) {
+            double d = (noiseValue / threshold) - (int) (noiseValue / threshold) - 0.5;
+            double platformHeight = (int) (noiseValue / threshold) * heightFactor
+                                    + (64 * Math.pow(d, 7) * heightFactor)
+                                    + detailsValue * heightFactor * 0.5;
+            int raiseHeight = (int) Math.round(platformHeight);
+            if (raiseHeight < 1) {
+                return GorgeColumnTransform.none();
+            }
+
+            Material[] addedTopShellMaterials = new Material[raiseHeight];
+            for (int y = 1; y <= raiseHeight; y++) {
+                Material material = GenUtils.randChoice(random, GORGE_RAISE_MATERIALS);
+                if (slabs
+                    && material != Material.GRASS_BLOCK
+                    && y == raiseHeight
+                    && platformHeight - (int) platformHeight >= 0.5)
+                {
+                    Material slab = Material.getMaterial(material.name() + "_SLAB");
+                    if (slab != null) {
+                        material = slab;
+                    }
+                }
+                addedTopShellMaterials[y - 1] = material;
+            }
+            if (detailsValue < 0.2 && GenUtils.chance(random, 3, 4)) {
+                addedTopShellMaterials[raiseHeight - 1] = Material.GRASS_BLOCK;
+            }
+            return new GorgeColumnTransform(raiseHeight, addedTopShellMaterials, 0, Integer.MIN_VALUE);
+        }
+
+        int depth = (int) Math.sqrt(Math.abs(rawCliffNoiseVal * edgeFactor) * 200 * 50);
+        if (baseHeight - depth < TerraformGenerator.seaLevel - 20) {
+            int depthToPreserve = baseHeight - (TerraformGenerator.seaLevel - 20);
+            depth = (int) (depthToPreserve + Math.round(Math.sqrt(depth - depthToPreserve)));
+        }
+        if (depth > baseHeight - 10) {
+            depth = baseHeight - 10;
+        }
+        if (depth < 1) {
+            return GorgeColumnTransform.none();
+        }
+        return new GorgeColumnTransform(0, new Material[0], depth, TerraformGenerator.seaLevel - 20);
+    }
+
+    private static @NotNull FastNoise getCliffNoise(@NotNull TerraformWorld tw) {
+        return NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_GORGE_CLIFFNOISE, world -> {
             FastNoise n = new FastNoise();
             n.SetNoiseType(FastNoise.NoiseType.CubicFractal);
             n.SetFractalOctaves(3);
             n.SetFrequency(0.04f);
             return n;
         });
+    }
 
-        FastNoise detailsNoise = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_GORGE_DETAILS, world -> {
+    private static @NotNull FastNoise getDetailsNoise(@NotNull TerraformWorld tw) {
+        return NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_GORGE_DETAILS, world -> {
             FastNoise n = new FastNoise();
             n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
             n.SetFrequency(0.03f);
             return n;
         });
+    }
 
+    public record GorgeColumnTransform(int raiseHeight,
+                                       Material[] addedTopShellMaterials,
+                                       int trimDepth,
+                                       int removedTopWaterlineY) {
+        private static final GorgeColumnTransform NONE = new GorgeColumnTransform(
+                0,
+                new Material[0],
+                0,
+                Integer.MIN_VALUE
+        );
 
-        double threshold = 0.1;
-        int heightFactor = 12;
-
-        int rawX = chunkX * 16 + x;
-        int rawZ = chunkZ * 16 + z;
-
-        double preciseHeight = HeightMap.getPreciseHeight(tw, rawX, rawZ);
-        int height = (int) preciseHeight;
-
-        double rawCliffNoiseVal = cliffNoise.GetNoise(rawX, rawZ);
-        double noiseValue = rawCliffNoiseVal * getBiomeBlender(tw).getEdgeFactor(BiomeBank.GORGE, rawX, rawZ);
-        double detailsValue = detailsNoise.GetNoise(rawX, rawZ);
-
-        // Raise up a tall area
-        if (noiseValue >= 0) {
-            double d = (noiseValue / threshold) - (int) (noiseValue / threshold) - 0.5;
-            double platformHeight = (int) (noiseValue / threshold) * heightFactor
-                                    + (64 * Math.pow(d, 7) * heightFactor)
-                                    + detailsValue * heightFactor * 0.5;
-
-            if (Math.round(platformHeight) >= 1) {
-                cache.writeTransformedHeight(x, z, (short) (Math.round(platformHeight) + height));
-            }
-            for (int y = 1; y <= (int) Math.round(platformHeight); y++) {
-                Material material = GenUtils.randChoice(Material.STONE,
-                        Material.STONE,
-                        Material.STONE,
-                        Material.STONE,
-                        Material.COBBLESTONE,
-                        Material.COBBLESTONE,
-                        Material.ANDESITE,
-                        Material.ANDESITE
-                );
-
-                if (slabs
-                    && material != Material.GRASS_BLOCK
-                    && y == (int) Math.round(platformHeight)
-                    && platformHeight - (int) platformHeight >= 0.5)
-                {
-                    material = Material.getMaterial(material.name() + "_SLAB");
-                }
-                chunk.setBlock(x, height + y, z, material);
-            }
-            if (detailsValue < 0.2 && GenUtils.chance(3, 4)) {
-                chunk.setBlock(x, height + (int) Math.round(platformHeight), z, Material.GRASS_BLOCK);
-
-            }
-        }
-        else // Burrow a gorge deep down like a ravine
-        {
-            int depth = (int) Math.sqrt(Math.abs(rawCliffNoiseVal * getBiomeBlender(tw).getEdgeFactor(
-                    BiomeBank.GORGE,
-                    rawX,
-                    rawZ
-            )) * 200 * 50);
-
-            // Smooth out anything that crosses the water threshold
-            if (height - depth < TerraformGenerator.seaLevel - 20) {
-                int depthToPreserve = height - (TerraformGenerator.seaLevel - 20);
-                depth = (int) (depthToPreserve + Math.round(Math.sqrt(depth - depthToPreserve)));
-            }
-
-            // Prevent going beneath y = 10
-            if (depth > height - 10) {
-                depth = height - 10;
-            }
-            // No guard here, depth is an integer, so if its 0, this cache write is safe
-            cache.writeTransformedHeight(x, z, (short) (height - depth));
-            for (int y = 0; y < depth; y++) {
-                if (TerraformGenerator.seaLevel - 20 >= height - y) {
-                    chunk.setBlock(x, height - y, z, Material.WATER);
-                }
-                else {
-                    chunk.setBlock(x, height - y, z, Material.AIR);
-                }
-            }
-
-            // Stop water from escaping. Also makes the highest-ground assertion true
-            // MYSTERIO IS THE TRUTH
-            if (height - depth <= TerraformGenerator.seaLevel - 20) {
-                chunk.setBlock(x, height - depth, z, Material.STONE);
-            }
+        public static @NotNull GorgeColumnTransform none() {
+            return NONE;
         }
     }
 

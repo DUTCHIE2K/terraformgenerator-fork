@@ -202,7 +202,9 @@ public enum HeightMap {
             }
             else {
                 h = (float) BiomeBank.calculateHeightIndependentBiome(tw, x, z).getHandler().calculateHeight(tw, x, z);
-                if (Math.pow(x, 2) + Math.pow(z, 2) < spawnFlatRadiusSquared) {
+                long xSquared = (long) x * x;
+                long zSquared = (long) z * z;
+                if (xSquared + zSquared < spawnFlatRadiusSquared) {
                     h = (float) HeightMap.CORE.getHeight(tw, x, z);
                 }
             }

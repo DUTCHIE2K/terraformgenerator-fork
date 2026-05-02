@@ -64,6 +64,7 @@ public enum BiomeClimate {
     final Range<Double> temperatureRange;
     final Range<Double> moistureRange;
     final int priority; // Higher priority means override.
+    private static final BiomeClimate[] VALUES = values();
 
     BiomeClimate(Range<Double> temperatureRange, Range<Double> moistureRange, int priority) {
         this.temperatureRange = temperatureRange;
@@ -79,7 +80,7 @@ public enum BiomeClimate {
 
         BiomeClimate candidate = BiomeClimate.TRANSITION;
 
-        for (BiomeClimate climate : BiomeClimate.values()) {
+        for (BiomeClimate climate : VALUES) {
             if (isInRange(temp, climate.getTemperatureRange()) && isInRange(moist, climate.getMoistureRange())) {
 
                 // If there are multiple climate ranges that apply to this, then

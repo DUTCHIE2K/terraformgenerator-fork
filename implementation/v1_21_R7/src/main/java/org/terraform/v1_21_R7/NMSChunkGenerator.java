@@ -77,8 +77,8 @@ public class NMSChunkGenerator extends ChunkGenerator {
         tw = TerraformWorld.get(worldName, seed);
         this.delegate = delegate;
 
-        // Set the long term biome handler to this one. The normal behaving one
-        // is initiated inside the cave carver
+        // Set the long term biome handler to this one. The gameplay biome source
+        // is engaged during the terrain cave generation pass.
         mapRendererBS = new MapRenderWorldProviderBiome(tw, delegate.getBiomeSource());
         twBS = new TerraformWorldProviderBiome(TerraformWorld.get(worldName, seed), delegate.getBiomeSource());
 

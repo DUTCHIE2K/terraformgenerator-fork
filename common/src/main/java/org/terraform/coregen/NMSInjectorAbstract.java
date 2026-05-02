@@ -3,9 +3,13 @@ package org.terraform.coregen;
 import org.bukkit.Chunk;
 import org.bukkit.World;
 import org.bukkit.block.Beehive;
+import org.bukkit.generator.ChunkGenerator;
 import org.jetbrains.annotations.Nullable;
+import org.terraform.cave.v3.CaveSamplerBridge;
+import org.terraform.cave.v3.CaveSettings;
 import org.terraform.coregen.populatordata.PopulatorDataAbstract;
 import org.terraform.coregen.populatordata.PopulatorDataICAAbstract;
+import org.terraform.data.TerraformWorld;
 
 public abstract class NMSInjectorAbstract {
 
@@ -48,11 +52,22 @@ public abstract class NMSInjectorAbstract {
         throw new UnsupportedOperationException("Tried to update physics without implementing.");
     }
 
+    public void markChunkDataForFluidPostProcessing(@SuppressWarnings("unused") ChunkGenerator.ChunkData chunkData,
+                                                    @SuppressWarnings("unused") int rawX,
+                                                    @SuppressWarnings("unused") int y,
+                                                    @SuppressWarnings("unused") int rawZ) {
+    }
+
     public int getMinY() {
         return 0;
     }
 
     public int getMaxY() {
         return 256;
+    }
+
+    public @Nullable CaveSamplerBridge createCaveSamplerBridge(@SuppressWarnings("unused") TerraformWorld tw,
+                                                               @SuppressWarnings("unused") CaveSettings settings) {
+        return null;
     }
 }

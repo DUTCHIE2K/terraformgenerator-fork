@@ -27,6 +27,8 @@ import org.terraform.utils.version.V_1_21_5;
 import org.terraform.utils.version.Version;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Random;
 
 public class BadlandsHandler extends BiomeHandler {
@@ -61,6 +63,84 @@ public class BadlandsHandler extends BiomeHandler {
             n.SetFrequency(plateauFrequency);
             return n;
         });
+    }
+
+    private static @NotNull FastNoise getWallNoise(@NotNull TerraformWorld tw) {
+        return NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_BADLANDS_WALLNOISE, world -> {
+            FastNoise n = new FastNoise((int) (tw.getWorld().getSeed() * 2));
+            n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
+            n.SetFrequency(0.07f);
+            n.SetFractalOctaves(2);
+            return n;
+        });
+    }
+
+    public static BadlandsColumnTransform sampleColumnTransform(@NotNull TerraformWorld tw, int rawX, int rawZ) {
+        double preciseHeight = HeightMap.getPreciseHeight(tw, rawX, rawZ);
+        if (HeightMap.getRawRiverDepth(tw, rawX, rawZ) <= 0) {
+            return null;
+        }
+
+        double riverlessHeight = HeightMap.getRiverlessHeight(tw, rawX, rawZ) - 2;
+        double edgeFactor = getRiversBlender(tw).getEdgeFactor(BiomeBank.BADLANDS, rawX, rawZ);
+        double bottomEdgeFactor = Math.min(2 * edgeFactor, 1);
+        double topEdgeFactor = Math.max(2 * edgeFactor - 1, 0);
+        double maxDiff = riverlessHeight - TerraformGenerator.seaLevel;
+        double heightAboveSea = preciseHeight - 2 - TerraformGenerator.seaLevel;
+        double riverFactor = heightAboveSea / maxDiff;
+        if (riverFactor <= 0 || heightAboveSea <= 0) {
+            return null;
+        }
+
+        HashMap<Integer, Material> solidOverrides = new HashMap<>();
+        FastNoise wallNoise = getWallNoise(tw);
+        int buildHeight = (int) Math.round(bottomEdgeFactor * (Math.min(1, 4 * Math.pow(riverFactor, 4))
+                                                               * maxDiff
+                                                               + wallNoise.GetNoise(rawX, rawZ) * 1.5));
+        for (int i = buildHeight; i >= 0; i--) {
+            int lowerHeight = Math.min(TerraformGenerator.seaLevel + i, (int) Math.round(riverlessHeight));
+            solidOverrides.put(lowerHeight, BlockUtils.getTerracotta(lowerHeight));
+        }
+
+        double threshold = 0.4 + (1 - topEdgeFactor) * 0.6;
+        if (riverFactor > threshold) {
+            if (topEdgeFactor == 0) {
+                return toColumnTransform(solidOverrides);
+            }
+
+            int upperBuildHeight = (int) Math.round(Math.min(1, 50 * Math.pow(riverFactor - threshold, 2.5))
+                                                    * maxDiff
+                                                    + wallNoise.GetNoise(rawX, rawZ) * 1.5);
+            for (int i = 0; i <= upperBuildHeight; i++) {
+                int upperHeight = (int) riverlessHeight - i;
+                solidOverrides.put(upperHeight, BlockUtils.getTerracotta(upperHeight));
+            }
+        }
+
+        if (riverFactor > threshold + 0.12) {
+            solidOverrides.put((int) riverlessHeight + 1, Material.RED_SAND);
+        }
+
+        return toColumnTransform(solidOverrides);
+    }
+
+    private static BadlandsColumnTransform toColumnTransform(@NotNull Map<Integer, Material> solidOverrides) {
+        if (solidOverrides.isEmpty()) {
+            return null;
+        }
+
+        int minY = Integer.MAX_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        for (int y : solidOverrides.keySet()) {
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        }
+
+        Material[] solidOverrideMaterials = new Material[(maxY - minY) + 1];
+        for (Map.Entry<Integer, Material> entry : solidOverrides.entrySet()) {
+            solidOverrideMaterials[entry.getKey() - minY] = entry.getValue();
+        }
+        return new BadlandsColumnTransform(minY, solidOverrideMaterials);
     }
 
     // This is for optimizing sand, ew
@@ -179,68 +259,17 @@ public class BadlandsHandler extends BiomeHandler {
         // This is perpetuating the cycle of abuse and falsehood
         // Let's leave it till it explodes for some reason
 
-        BiomeBlender blender = getRiversBlender(tw);
-
-        FastNoise wallNoise = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_BADLANDS_WALLNOISE, world -> {
-            FastNoise n = new FastNoise((int) (tw.getWorld().getSeed() * 2));
-            n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
-            n.SetFrequency(0.07f);
-            n.SetFractalOctaves(2);
-            return n;
-        });
-
         int rawX = chunkX * 16 + x;
         int rawZ = chunkZ * 16 + z;
+        BadlandsColumnTransform transform = sampleColumnTransform(tw, rawX, rawZ);
+        if (transform == null) {
+            return;
+        }
 
-        double preciseHeight = HeightMap.getPreciseHeight(tw, rawX, rawZ);
-
-        if (HeightMap.getRawRiverDepth(tw, rawX, rawZ) > 0) {
-            double riverlessHeight = HeightMap.getRiverlessHeight(tw, rawX, rawZ) - 2;
-
-            // These are for blending river effect with other biomes
-            double edgeFactor = blender.getEdgeFactor(BiomeBank.BADLANDS, rawX, rawZ);
-            double bottomEdgeFactor = Math.min(2 * edgeFactor, 1);
-            double topEdgeFactor = Math.max(2 * edgeFactor - 1, 0);
-
-            // Max height difference between sea level and riverlessHeight
-            double maxDiff = riverlessHeight - TerraformGenerator.seaLevel;
-            double heightAboveSea = preciseHeight - 2 - TerraformGenerator.seaLevel;
-            double riverFactor = heightAboveSea / maxDiff; // 0 at river level, 1 at riverlessHeight
-
-            if (riverFactor > 0 && heightAboveSea > 0) {
-                int buildHeight = (int) Math.round(bottomEdgeFactor * (Math.min(1, 4 * Math.pow(riverFactor, 4))
-                                                                       * maxDiff
-                                                                       + wallNoise.GetNoise(rawX, rawZ) * 1.5));
-
-                for (int i = buildHeight; i >= 0; i--) {
-                    int lowerHeight = Math.min(TerraformGenerator.seaLevel + i, (int) Math.round(riverlessHeight));
-
-                    chunk.setBlock(x, lowerHeight, z, BlockUtils.getTerracotta(lowerHeight));
-                }
-
-                double threshold = 0.4 + (1 - topEdgeFactor) * 0.6;
-
-                // Curved top edges
-                if (riverFactor > threshold) {
-                    int upperBuildHeight = (int) Math.round(1 *// topEdgeFactor *
-                                                            (Math.min(1, 50 * Math.pow(riverFactor - threshold, 2.5))
-                                                             * maxDiff + wallNoise.GetNoise(rawX, rawZ) * 1.5));
-
-                    if (topEdgeFactor == 0) {
-                        return;
-                    }
-
-                    for (int i = 0; i <= upperBuildHeight; i++) {
-                        int upperHeight = (int) riverlessHeight - i;
-
-                        chunk.setBlock(x, upperHeight, z, BlockUtils.getTerracotta(upperHeight));
-                    }
-                }
-
-                // Coat with red sand
-                if (riverFactor > threshold + 0.12) {
-                    chunk.setBlock(x, (int) riverlessHeight + 1, z, Material.RED_SAND);
-                }
+        for (int offset = 0; offset < transform.solidOverrideMaterials().length; offset++) {
+            Material material = transform.solidOverrideMaterials()[offset];
+            if (material != null) {
+                chunk.setBlock(x, transform.minY() + offset, z, material);
             }
         }
     }
@@ -431,5 +460,8 @@ public class BadlandsHandler extends BiomeHandler {
     @Override
     public @NotNull BiomeBank getBeachType() {
         return BiomeBank.BADLANDS_BEACH;
+    }
+
+    public record BadlandsColumnTransform(int minY, Material @NotNull [] solidOverrideMaterials) {
     }
 }

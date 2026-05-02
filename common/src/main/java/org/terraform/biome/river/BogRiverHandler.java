@@ -24,6 +24,30 @@ import org.terraform.utils.noise.NoiseCacheHandler.NoiseCacheEntry;
 import java.util.Random;
 
 public class BogRiverHandler extends BiomeHandler {
+    private static @NotNull FastNoise getSinkinNoise(@NotNull TerraformWorld tw) {
+        return NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_MUDDYBOG_HEIGHTMAP, world -> {
+            FastNoise n = new FastNoise((int) tw.getSeed());
+            n.SetNoiseType(NoiseType.SimplexFractal);
+            n.SetFractalOctaves(4);
+            n.SetFrequency(0.005f);
+            return n;
+        });
+    }
+
+    public static int getTransformRaise(@NotNull TerraformWorld tw, int rawX, int rawZ, int surfaceY) {
+        double noise = getSinkinNoise(tw).GetNoise(rawX, rawZ);
+        if (noise <= -0.2 || surfaceY >= TerraformGenerator.seaLevel) {
+            return 0;
+        }
+
+        noise += 0.5;
+        if (noise > 1.05) {
+            noise = 1.05;
+        }
+
+        double maxHeight = (TerraformGenerator.seaLevel - surfaceY) + 2.0;
+        return (int) Math.round(maxHeight * noise);
+    }
 
     @Override
     public boolean isOcean() {
@@ -70,42 +94,24 @@ public class BogRiverHandler extends BiomeHandler {
         int rawX = chunkX * 16 + x;
         int rawZ = chunkZ * 16 + z;
 
-        FastNoise sinkin = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_MUDDYBOG_HEIGHTMAP, world -> {
-            FastNoise n = new FastNoise((int) tw.getSeed());
-            n.SetNoiseType(NoiseType.SimplexFractal);
-            n.SetFractalOctaves(4);
-            n.SetFrequency(0.005f);
-            return n;
-        });
+        int height = getTransformRaise(tw, rawX, rawZ, cache.getTransformedHeight(x, z));
+        if (height < 1) {
+            return;
+        }
+        if (tw.getBiomeBank(rawX, rawZ) != BiomeBank.BOG_RIVER
+            && tw.getBiomeBank(rawX, rawZ) != BiomeBank.MUDDY_BOG
+            && tw.getBiomeBank(rawX, rawZ) != BiomeBank.BOG_BEACH)
+        {
+            return;
+        }
 
-        double noise = sinkin.GetNoise(rawX, rawZ);
-        if (noise > -0.2) {
-            noise += 0.5;
-            if (noise > 1.05) {
-                noise = 1.05;
-            }
-            if (cache.getTransformedHeight(x, z) < TerraformGenerator.seaLevel) {
-                double maxHeight = (TerraformGenerator.seaLevel - cache.getTransformedHeight(x, z)) + 2.0;
-                int height = (int) Math.round((maxHeight * noise));
+        for (int newHeight = 1; newHeight <= height; newHeight++) {
+            chunk.setBlock(x, cache.getTransformedHeight(x, z) + newHeight, z, Material.DIRT);
+        }
 
-                if (tw.getBiomeBank(rawX, rawZ) != BiomeBank.BOG_RIVER
-                    && tw.getBiomeBank(rawX, rawZ) != BiomeBank.MUDDY_BOG
-                    && tw.getBiomeBank(rawX, rawZ) != BiomeBank.BOG_BEACH)
-                {
-                    height = 0;
-                }
-
-                for (int newHeight = 1; newHeight <= height; newHeight++) {
-                    chunk.setBlock(x, cache.getTransformedHeight(x, z) + newHeight, z, Material.DIRT);
-                }
-
-                if (height >= 1) {
-                    cache.writeTransformedHeight(x, z, (short) (cache.getTransformedHeight(x, z) + height));
-                }
-                if (cache.getTransformedHeight(x, z) >= TerraformGenerator.seaLevel) {
-                    chunk.setBlock(x, cache.getTransformedHeight(x, z), z, Material.GRASS_BLOCK);
-                }
-            }
+        cache.writeTransformedHeight(x, z, (short) (cache.getTransformedHeight(x, z) + height));
+        if (cache.getTransformedHeight(x, z) >= TerraformGenerator.seaLevel) {
+            chunk.setBlock(x, cache.getTransformedHeight(x, z), z, Material.GRASS_BLOCK);
         }
     }
 

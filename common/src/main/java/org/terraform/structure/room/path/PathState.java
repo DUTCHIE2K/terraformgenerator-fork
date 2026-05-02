@@ -32,7 +32,7 @@ public class PathState {
     /*
     /* General settings
     */
-    public @NotNull PathWriter writer = new CavePathWriter(0, 0, 0, 0, 0, 0);
+    public @NotNull PathWriter writer = new StructureCavePathWriter(0, 0, 0, 0, 0, 0);
     private final int pathRadius;
     private final int pathHeight;
 

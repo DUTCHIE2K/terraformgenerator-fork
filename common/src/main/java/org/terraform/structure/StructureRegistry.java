@@ -2,13 +2,14 @@ package org.terraform.structure;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.terraform.biome.BiomeBank;
 import org.terraform.data.MegaChunk;
 import org.terraform.data.TerraformWorld;
 import org.terraform.main.TerraformGeneratorPlugin;
 import org.terraform.main.config.TConfig;
 import org.terraform.structure.ancientcity.AncientCityPopulator;
 import org.terraform.structure.catacombs.CatacombsPopulator;
-import org.terraform.structure.caves.LargeCavePopulator;
+import org.terraform.structure.caves.LargeCaveStructurePopulator;
 import org.terraform.structure.mineshaft.BadlandsMinePopulator;
 import org.terraform.structure.mineshaft.MineshaftPopulator;
 import org.terraform.structure.monument.MonumentPopulator;
@@ -35,6 +36,9 @@ import java.util.*;
 import java.util.Map.Entry;
 
 public class StructureRegistry {
+    private static final StructureType[] LARGE_STRUCTURE_QUERY_TYPES = {
+            StructureType.LARGE_CAVE, StructureType.VILLAGE, StructureType.LARGE_MISC
+    };
 
     /**
      * The difference small and large is that Large structure populators only run when
@@ -49,6 +53,13 @@ public class StructureRegistry {
         TerraformWorld tw = key.tw;
         MegaChunk mc = key.mc;
         Random structRand = tw.getHashedRand(9, mc.getX(), mc.getZ());
+        int[] centerCoords = mc.getCenterBiomeSectionBlockCoords();
+        if (centerCoords == null) {
+            return new SingleMegaChunkStructurePopulator[0];
+        }
+        int centerChunkX = centerCoords[0] >> 4;
+        int centerChunkZ = centerCoords[1] >> 4;
+        BiomeBank centerBiome = mc.getCenterBiomeSection(tw).getBiomeBank();
         int maxStructures = 3; // GenUtils.randInt(structRand, 1, TConfigOption.STRUCTURES_MEGACHUNK_MAXSTRUCTURES);
         SingleMegaChunkStructurePopulator[] pops = new SingleMegaChunkStructurePopulator[maxStructures];
         int size = 0;
@@ -63,16 +74,11 @@ public class StructureRegistry {
                     largeStructureRegistry.get(StructureType.MEGA_DUNGEON)
             );
             for (SingleMegaChunkStructurePopulator pop : available) {
-                int[] coords = mc.getCenterBiomeSectionBlockCoords(); // pop.getCoordsFromMegaChunk(tw, mc);
-                if (coords == null) {
-                    continue;
-                }
-
                 if (TConfig.areStructuresEnabled() && pop.canSpawn(
                         tw,
-                        coords[0] >> 4,
-                        coords[1] >> 4,
-                        mc.getCenterBiomeSection(tw).getBiomeBank()
+                        centerChunkX,
+                        centerChunkZ,
+                        centerBiome
                 ))
                 {
                     pops[size] = pop;
@@ -84,16 +90,14 @@ public class StructureRegistry {
         // Mega Dungeon will be in slot 0 (highest priority). The others are backups.
         // if (size == 0) {
         // TerraformGeneratorPlugin.logger.info(ChatColor.YELLOW + "MC: " + mc.getX() + "," + mc.getZ() + " - No Mega Dungeon");
-        StructureType[] types = {StructureType.LARGE_CAVE, StructureType.VILLAGE, StructureType.LARGE_MISC};
-        types = (StructureType[]) shuffleArray(structRand, types);
+        StructureType[] types = (StructureType[]) shuffleArray(structRand, LARGE_STRUCTURE_QUERY_TYPES);
         for (StructureType type : types) {
             if (largeStructureRegistry.containsKey(type)) {
                 for (SingleMegaChunkStructurePopulator pop : largeStructureRegistry.get(type)) {
-                    int[] coords = mc.getCenterBiomeSectionBlockCoords();
                     if (TConfig.areStructuresEnabled() && pop.canSpawn(tw,
-                            coords[0] >> 4,
-                            coords[1] >> 4,
-                            mc.getCenterBiomeSection(tw).getBiomeBank()
+                            centerChunkX,
+                            centerChunkZ,
+                            centerBiome
                     ))
                     {
                         pops[size] = pop;
@@ -131,7 +135,7 @@ public class StructureRegistry {
             registerStructure(StructureType.MEGA_DUNGEON, new TrialChamberPopulator());
         }
 
-        registerStructure(StructureType.LARGE_CAVE, new LargeCavePopulator());
+        registerStructure(StructureType.LARGE_CAVE, new LargeCaveStructurePopulator());
 
         registerStructure(StructureType.LARGE_MISC, new MineshaftPopulator());
         registerStructure(StructureType.LARGE_MISC, new CatacombsPopulator());

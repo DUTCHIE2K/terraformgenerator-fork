@@ -27,6 +27,8 @@ import org.terraform.utils.noise.FastNoise;
 import org.terraform.utils.noise.NoiseCacheHandler;
 import org.terraform.utils.noise.NoiseCacheHandler.NoiseCacheEntry;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Random;
 
 public class ArchedCliffsHandler extends BiomeHandler {
@@ -40,6 +42,105 @@ public class ArchedCliffsHandler extends BiomeHandler {
             biomeBlender = new BiomeBlender(tw, true, true).setGridBlendingFactor(4).setSmoothBlendTowardsRivers(4);
         }
         return biomeBlender;
+    }
+
+    private static @NotNull FastNoise getPlatformNoise(@NotNull TerraformWorld tw) {
+        return NoiseCacheHandler.getNoise(tw,
+                NoiseCacheEntry.BIOME_ARCHEDCLIFFS_PLATFORMNOISE,
+                world -> {
+                    FastNoise n = new FastNoise(tw.getRand(12115222).nextInt());
+                    n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
+                    n.SetFractalOctaves(3);
+                    n.SetFrequency(0.01f);
+                    return n;
+                }
+        );
+    }
+
+    private static @NotNull FastNoise getPillarNoise(@NotNull TerraformWorld tw) {
+        return NoiseCacheHandler.getNoise(tw,
+                NoiseCacheEntry.BIOME_ARCHEDCLIFFS_PILLARNOISE,
+                world -> {
+                    FastNoise n = new FastNoise(tw.getRand(12544422).nextInt());
+                    n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
+                    n.SetFractalOctaves(4);
+                    n.SetFrequency(0.01f);
+                    return n;
+                }
+        );
+    }
+
+    public static ArchedCliffsColumnTransform sampleColumnTransform(@NotNull TerraformWorld tw,
+                                                                    @NotNull Random random,
+                                                                    int rawX,
+                                                                    int rawZ)
+    {
+        int height = (int) HeightMap.getPreciseHeight(tw, rawX, rawZ);
+        int platformNoiseVal = (int) Math.round(Math.max(getPlatformNoise(tw).GetNoise(rawX, rawZ)
+                                                         * 70
+                                                         * getBiomeBlender(tw).getEdgeFactor(
+                BiomeBank.ARCHED_CLIFFS,
+                rawX,
+                rawZ
+        ), 0));
+        if (platformNoiseVal < 1) {
+            return null;
+        }
+
+        int platformHeight = (int) (HeightMap.CORE.getHeight(tw, rawX, rawZ) - HeightMap.ATTRITION.getHeight(
+                tw,
+                rawX,
+                rawZ
+        ) + 55);
+        Material[] crust = new ArchedCliffsHandler().getSurfaceCrust(random);
+        HashMap<Integer, Material> solidWrites = new HashMap<>();
+
+        for (int i = 0; i < platformNoiseVal; i++) {
+            int y = platformHeight - i;
+            solidWrites.put(y, i < crust.length ? crust[i] : Material.STONE);
+        }
+
+        if (platformNoiseVal > 6) {
+            int pillarNoiseVal = (int) ((platformNoiseVal / 10.0) * ((0.1 + Math.abs(getPillarNoise(tw).GetNoise(
+                    rawX,
+                    rawZ
+            ))) * 20.0));
+            if (pillarNoiseVal + height > platformHeight) {
+                pillarNoiseVal = platformHeight - height;
+            }
+
+            boolean applyCrust = !solidWrites.containsKey(height + pillarNoiseVal + 1);
+            for (int i = pillarNoiseVal; i >= 1; i--) {
+                int crustIndex = pillarNoiseVal - i;
+                solidWrites.put(
+                        height + i,
+                        crustIndex < crust.length && applyCrust ? crust[crustIndex] : Material.STONE
+                );
+            }
+        }
+
+        return toColumnTransform(platformHeight, solidWrites);
+    }
+
+    private static ArchedCliffsColumnTransform toColumnTransform(int platformHeight,
+                                                                 @NotNull Map<Integer, Material> solidWrites)
+    {
+        if (solidWrites.isEmpty()) {
+            return null;
+        }
+
+        int minY = Integer.MAX_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        for (int y : solidWrites.keySet()) {
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        }
+
+        Material[] solidOverrideMaterials = new Material[(maxY - minY) + 1];
+        for (Map.Entry<Integer, Material> entry : solidWrites.entrySet()) {
+            solidOverrideMaterials[entry.getKey() - minY] = entry.getValue();
+        }
+        return new ArchedCliffsColumnTransform(platformHeight, minY, solidOverrideMaterials);
     }
 
     @Override
@@ -208,88 +309,18 @@ public class ArchedCliffsHandler extends BiomeHandler {
                                  int chunkX,
                                  int chunkZ)
     {
-
-        FastNoise platformNoise = NoiseCacheHandler.getNoise(tw,
-                NoiseCacheEntry.BIOME_ARCHEDCLIFFS_PLATFORMNOISE,
-                world -> {
-                    FastNoise n = new FastNoise(tw.getRand(12115222).nextInt());
-                    n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
-                    n.SetFractalOctaves(3);
-                    n.SetFrequency(0.01f);
-                    return n;
-                }
-        );
-
-        FastNoise pillarNoise = NoiseCacheHandler.getNoise(tw,
-                NoiseCacheEntry.BIOME_ARCHEDCLIFFS_PILLARNOISE,
-                world -> {
-                    FastNoise n = new FastNoise(tw.getRand(12544422).nextInt());
-                    n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
-                    n.SetFractalOctaves(4);
-                    n.SetFrequency(0.01f);
-                    return n;
-                }
-        );
-
         int rawX = chunkX * 16 + x;
         int rawZ = chunkZ * 16 + z;
+        ArchedCliffsColumnTransform transform = sampleColumnTransform(tw, random, rawX, rawZ);
+        if (transform == null) {
+            return;
+        }
 
-        double preciseHeight = HeightMap.getPreciseHeight(tw, rawX, rawZ);
-        int height = (int) preciseHeight;
-
-        // Round to force a 0 if the value is too low. Makes blending better.
-        double platformNoiseVal = Math.round(Math.max(platformNoise.GetNoise(rawX, rawZ)
-                                                      * 70
-                                                      * getBiomeBlender(tw).getEdgeFactor(
-                BiomeBank.ARCHED_CLIFFS,
-                rawX,
-                rawZ
-        ), 0));
-
-        if (platformNoiseVal >= 1) {
-            int platformHeight = (int) (HeightMap.CORE.getHeight(tw, rawX, rawZ) - HeightMap.ATTRITION.getHeight(
-                    tw,
-                    rawX,
-                    rawZ
-            ) + 55);
-
-            // for higher platform noise vals, make a thicker platform
-            cache.writeTransformedHeight(x, z, (short) platformHeight);
-            chunk.setBlock(x, platformHeight, z, Material.GRASS_BLOCK);
-            Material[] crust = getSurfaceCrust(random);
-            for (int i = 0; i < platformNoiseVal; i++) {
-                if (i < crust.length) {
-                    chunk.setBlock(x, platformHeight - i, z, crust[i]);
-                }
-                else {
-                    chunk.setBlock(x, platformHeight - i, z, Material.STONE);
-                }
-            }
-
-            // This is for the bottom platform
-            // DOES NOT change height, so can be ignored in pure height calculation
-            // This is bad practice
-            if (!(chunk instanceof DudChunkData) && platformNoiseVal > 6) {
-                int pillarNoiseVal = (int) ((platformNoiseVal / 10.0) * ((0.1 + Math.abs(pillarNoise.GetNoise(
-                        rawX,
-                        rawZ
-                ))) * 20.0));
-                if (pillarNoiseVal + height > platformHeight) {
-                    pillarNoiseVal = platformHeight - height;
-                }
-
-                // Crust cannot be under solids.
-                // Guarded from DudChunkData, so safe to read
-                boolean applyCrust = !chunk.getType(x, height + pillarNoiseVal + 1, z).isSolid();
-
-                for (int i = pillarNoiseVal; i >= 1; i--) {
-                    if ((pillarNoiseVal - i) < crust.length && applyCrust) {
-                        chunk.setBlock(x, height + i, z, crust[pillarNoiseVal - i]);
-                    }
-                    else {
-                        chunk.setBlock(x, height + i, z, Material.STONE);
-                    }
-                }
+        cache.writeTransformedHeight(x, z, (short) transform.caveSurfaceY());
+        for (int offset = 0; offset < transform.solidOverrideMaterials().length; offset++) {
+            Material material = transform.solidOverrideMaterials()[offset];
+            if (material != null) {
+                chunk.setBlock(x, transform.minY() + offset, z, material);
             }
         }
     }
@@ -299,5 +330,9 @@ public class ArchedCliffsHandler extends BiomeHandler {
         return (int) HeightMap.CORE.getHeight(tw, x, z);
     }
 
+    public record ArchedCliffsColumnTransform(int caveSurfaceY,
+                                              int minY,
+                                              Material @NotNull [] solidOverrideMaterials) {
+    }
 
 }

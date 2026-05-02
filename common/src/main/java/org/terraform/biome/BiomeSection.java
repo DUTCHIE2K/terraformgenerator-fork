@@ -7,6 +7,7 @@ import org.terraform.data.TerraformWorld;
 import org.terraform.main.TerraformGeneratorPlugin;
 import org.terraform.main.config.TConfig;
 import org.terraform.utils.GenUtils;
+import org.terraform.utils.HashUtils;
 import org.terraform.utils.noise.FastNoise;
 import org.terraform.utils.noise.FastNoise.NoiseType;
 
@@ -19,12 +20,27 @@ public class BiomeSection {
     public static final int minSize = sectionWidth;
     public static final int dominanceThreshold = (int) (0.35 * sectionWidth);
     public static final int dominanceThresholdSquared = dominanceThreshold*dominanceThreshold;
+    private static final long DITHER_BLOCK_X_MULTIPLIER = 0x9E3779B97F4A7C15L;
+    private static final long DITHER_BLOCK_Z_MULTIPLIER = 0xC2B2AE3D27D4EB4FL;
+    private static final long DITHER_SECTION_X_MULTIPLIER = 0x165667B19E3779F9L;
+    private static final long DITHER_SECTION_Z_MULTIPLIER = 0x85EBCA77C2B2AE63L;
     private final int x;
     private final int z;
     private final TerraformWorld tw;
+    private final int centerX;
+    private final int centerZ;
+    private final @NotNull SimpleLocation center;
+    private final @NotNull SimpleLocation lowerBounds;
+    private final @NotNull SimpleLocation upperBounds;
+    private final int sectionSeed;
+    private final int hash;
     private float temperature;
     private float moisture;
     private int radius;
+    private double inverseRadiusSquared;
+    private double oceanLevel;
+    private double mountainLevel;
+    private @Nullable BiomeClimate climate;
     private @Nullable BiomeBank biome;
     private FastNoise shapeNoise;
 
@@ -32,15 +48,24 @@ public class BiomeSection {
      * Block x and z
      */
     protected BiomeSection(TerraformWorld tw, int x, int z) {
-        this.x = x >> bitshifts;
-        this.z = z >> bitshifts;
-        this.tw = tw;
+        this(tw, x >> bitshifts, z >> bitshifts, true);
     }
 
     protected BiomeSection(TerraformWorld tw, int x, int z, boolean useSectionCoords) {
-        this.x = x;
-        this.z = z;
+        this.x = useSectionCoords ? x : x >> bitshifts;
+        this.z = useSectionCoords ? z : z >> bitshifts;
         this.tw = tw;
+        this.centerX = (this.x << bitshifts) + sectionWidth / 2;
+        this.centerZ = (this.z << bitshifts) + sectionWidth / 2;
+        this.center = new SimpleLocation(centerX, 0, centerZ);
+        this.lowerBounds = new SimpleLocation(this.x << bitshifts, 0, this.z << bitshifts);
+        this.upperBounds = new SimpleLocation((this.x << bitshifts) + sectionWidth, 0, (this.z << bitshifts) + sectionWidth);
+        this.sectionSeed = HashUtils.hashSeed(tw.getSeed(), this.x, this.z);
+        int hash = 5;
+        hash = 13 * hash + this.x;
+        hash = 13 * hash + this.z;
+        hash = 13 * hash + tw.getName().hashCode();
+        this.hash = hash;
     }
 
     /**
@@ -52,16 +77,15 @@ public class BiomeSection {
                                                                            int blockZ)
     {
         BiomeSection homeSection = BiomeBank.getBiomeSectionFromBlockCoords(tw, blockX, blockZ);
-        Collection<BiomeSection> sections = new ArrayList<>();
+        Collection<BiomeSection> sections = new ArrayList<>(width * width);
 
-        SimpleLocation center = homeSection.getCenter();
         int startX, startZ;
         if (width % 2 == 1) {
             startX = startZ = -width / 2;
         }
         else {
-            startX = blockX >= center.getX() ? -width / 2 - 1 : -width / 2;
-            startZ = blockZ >= center.getZ() ? -width / 2 - 1 : -width / 2;
+            startX = blockX >= homeSection.centerX ? -width / 2 - 1 : -width / 2;
+            startZ = blockZ >= homeSection.centerZ ? -width / 2 - 1 : -width / 2;
         }
 
         for (int rx = startX; rx < startX + width; rx++) {
@@ -81,61 +105,52 @@ public class BiomeSection {
      * @return the four closest biome sections to this block point
      */
     public static @NotNull Collection<BiomeSection> getSurroundingSections(TerraformWorld tw, int blockX, int blockZ) {
-        Collection<BiomeSection> sections = new ArrayList<>();
+        Collection<BiomeSection> sections = new ArrayList<>(4);
 
         BiomeSection homeBiome = BiomeBank.getBiomeSectionFromBlockCoords(tw, blockX, blockZ);
         sections.add(homeBiome);
-
-        SimpleLocation center = homeBiome.getCenter();
-        if (blockX >= center.getX()) {
-            if (blockZ >= center.getZ()) {
-                sections.add(homeBiome.getRelative(1, 0));
-                sections.add(homeBiome.getRelative(1, 1));
-                sections.add(homeBiome.getRelative(0, 1));
-            }
-            else {
-                sections.add(homeBiome.getRelative(1, 0));
-                sections.add(homeBiome.getRelative(1, -1));
-                sections.add(homeBiome.getRelative(0, -1));
-            }
-        }
-        else {
-            if (blockZ >= center.getZ()) {
-                sections.add(homeBiome.getRelative(-1, 0));
-                sections.add(homeBiome.getRelative(-1, 1));
-                sections.add(homeBiome.getRelative(0, 1));
-            }
-            else {
-                sections.add(homeBiome.getRelative(-1, 0));
-                sections.add(homeBiome.getRelative(-1, -1));
-                sections.add(homeBiome.getRelative(0, -1));
-            }
-
-        }
+        int relativeX = blockX >= homeBiome.centerX ? 1 : -1;
+        int relativeZ = blockZ >= homeBiome.centerZ ? 1 : -1;
+        sections.add(homeBiome.getRelative(relativeX, 0));
+        sections.add(homeBiome.getRelative(relativeX, relativeZ));
+        sections.add(homeBiome.getRelative(0, relativeZ));
         return sections;
     }
 
     public static @NotNull BiomeSection getMostDominantSection(@NotNull TerraformWorld tw, int x, int z) {
-
         double dither = TConfig.c.BIOME_DITHER;
-        Random locationBasedRandom = new Random(Objects.hash(tw.getSeed(), x, z));
-        SimpleLocation target = new SimpleLocation(x, 0, z);
         BiomeSection homeSection = BiomeBank.getBiomeSectionFromBlockCoords(tw, x, z);
+        int xOffset = homeSection.centerX - x;
+        int zOffset = homeSection.centerZ - z;
 
         // Don't calculate if distance is very close to center
-        if (target.distanceSqr(homeSection.getCenter()) <= dominanceThresholdSquared) {
+        if (xOffset * xOffset + zOffset * zOffset <= dominanceThresholdSquared) {
             return homeSection;
         }
 
-        Collection<BiomeSection> sections = BiomeSection.getSurroundingSections(tw, x, z);
         BiomeSection mostDominant = homeSection;
+        float mostDominantScore = getDominanceScore(homeSection, tw.getSeed(), x, z, dither);
+        int relativeX = x >= homeSection.centerX ? 1 : -1;
+        int relativeZ = z >= homeSection.centerZ ? 1 : -1;
 
-        for (BiomeSection sect : sections) {
-            float dom = (float) (sect.getDominance(target) + GenUtils.randDouble(locationBasedRandom, -dither, dither));
+        BiomeSection candidate = homeSection.getRelative(relativeX, 0);
+        float candidateScore = getDominanceScore(candidate, tw.getSeed(), x, z, dither);
+        if (candidateScore > mostDominantScore) {
+            mostDominant = candidate;
+            mostDominantScore = candidateScore;
+        }
 
-            if (dom > mostDominant.getDominance(target) + GenUtils.randDouble(locationBasedRandom, -dither, dither)) {
-                mostDominant = sect;
-            }
+        candidate = homeSection.getRelative(relativeX, relativeZ);
+        candidateScore = getDominanceScore(candidate, tw.getSeed(), x, z, dither);
+        if (candidateScore > mostDominantScore) {
+            mostDominant = candidate;
+            mostDominantScore = candidateScore;
+        }
+
+        candidate = homeSection.getRelative(0, relativeZ);
+        candidateScore = getDominanceScore(candidate, tw.getSeed(), x, z, dither);
+        if (candidateScore > mostDominantScore) {
+            mostDominant = candidate;
         }
 
         return mostDominant;
@@ -143,19 +158,22 @@ public class BiomeSection {
 
     protected void doCalculations() {
         this.radius = GenUtils.randInt(getSectionRandom(), minSize / 2, 5 * minSize / 4);
-        this.shapeNoise = new FastNoise(Objects.hash(tw.getSeed(), x, z));
+        this.inverseRadiusSquared = 1.0 / ((double) radius * radius);
+        this.shapeNoise = new FastNoise(sectionSeed);
         shapeNoise.SetNoiseType(NoiseType.SimplexFractal);
         shapeNoise.SetFractalOctaves(3);
         shapeNoise.SetFrequency(0.01f);
+        this.oceanLevel = tw.getOceanicNoise().GetNoise(x, z) * 50.0;
+        this.mountainLevel = tw.getMountainousNoise().GetNoise(x, z) * 50.0;
         this.biome = this.parseBiomeBank();
     }
 
     public @NotNull Random getSectionRandom() {
-        return new Random(Objects.hash(tw.getSeed(), x, z));
+        return new Random(sectionSeed);
     }
 
     public @NotNull Random getSectionRandom(int multiplier) {
-        return new Random((long) multiplier * Objects.hash(tw.getSeed(), x, z));
+        return new Random((long) multiplier * sectionSeed);
     }
 
     public @NotNull BiomeSection getRelative(int x, int z) {
@@ -174,12 +192,9 @@ public class BiomeSection {
     private @NotNull BiomeBank parseBiomeBank() {
         temperature = 3f * 2.5f * tw.getTemperatureOctave().GetNoise(this.x, this.z);
         moisture = 3f * 2.5f * tw.getMoistureOctave().GetNoise(this.x, this.z);
+        climate = BiomeClimate.selectClimate(temperature, moisture);
 
-        return BiomeBank.selectBiome(
-                this,
-                temperature,
-                moisture
-        );
+        return BiomeBank.selectBiome(this, climate);
     }
 
     /**
@@ -191,13 +206,10 @@ public class BiomeSection {
     }
 
     public float getDominanceBasedOnRadius(int blockX, int blockZ) {
-        SimpleLocation center = this.getCenter();
-
-        int xOffset = center.getX() - blockX;
-        int zOffset = center.getZ() - blockZ;
-
-        double equationResult = Math.pow(xOffset, 2) / Math.pow(radius, 2)
-                                + Math.pow(zOffset, 2) / Math.pow(radius, 2)
+        int xOffset = centerX - blockX;
+        int zOffset = centerZ - blockZ;
+        double equationResult = ((double) xOffset * xOffset) * inverseRadiusSquared
+                                + ((double) zOffset * zOffset) * inverseRadiusSquared
                                 + 0.7 * shapeNoise.GetNoise(xOffset, zOffset);
 
         return (float) (1 - 1 * (equationResult));
@@ -205,27 +217,21 @@ public class BiomeSection {
     }
 
     public @NotNull SimpleLocation getCenter() {
-        int x = ((this.x << bitshifts)) + sectionWidth / 2;
-        int z = ((this.z << bitshifts)) + sectionWidth / 2;
-        return new SimpleLocation(x, 0, z);
+        return center;
     }
 
     /**
      * @return Block coords of lowest coord pair in the section's square
      */
     public @NotNull SimpleLocation getLowerBounds() {
-        int x = ((this.x << bitshifts));
-        int z = ((this.z << bitshifts));
-        return new SimpleLocation(x, 0, z);
+        return lowerBounds;
     }
 
     /**
      * @return Block coords of highest coord pair in the section's square
      */
     public @NotNull SimpleLocation getUpperBounds() {
-        int x = ((this.x << bitshifts)) + sectionWidth;
-        int z = ((this.z << bitshifts)) + sectionWidth;
-        return new SimpleLocation(x, 0, z);
+        return upperBounds;
     }
 
     /**
@@ -242,20 +248,18 @@ public class BiomeSection {
         // xox  x o x
         // xxx  x   x
         //     xxxxx
-        ArrayList<BiomeSection> candidates = new ArrayList<>();
+        ArrayList<BiomeSection> candidates = new ArrayList<>(radius * 8);
 
         // Lock rX, iterate rZ
-        for (int rx : new int[] {-radius, radius}) {
-            for (int rz = -radius; rz <= radius; rz++) {
-                candidates.add(this.getRelative(rx, rz));
-            }
+        for (int rz = -radius; rz <= radius; rz++) {
+            candidates.add(this.getRelative(-radius, rz));
+            candidates.add(this.getRelative(radius, rz));
         }
 
         // Lock rZ, iterate rX
-        for (int rz : new int[] {-radius, radius}) {
-            for (int rx = 1 - radius; rx <= radius - 1; rx++) {
-                candidates.add(this.getRelative(rx, rz));
-            }
+        for (int rx = 1 - radius; rx <= radius - 1; rx++) {
+            candidates.add(this.getRelative(rx, -radius));
+            candidates.add(this.getRelative(rx, radius));
         }
 
         return candidates;
@@ -269,9 +273,8 @@ public class BiomeSection {
      */
     public @NotNull BiomeSubSection getSubSection(int rawX, int rawZ) {
         // if(new BiomeSection(tw, rawX, rawZ).equals(this)) {
-        SimpleLocation sectionCenter = this.getCenter();
-        int relXFromCenter = rawX - sectionCenter.getX();
-        int relZFromCenter = rawZ - sectionCenter.getZ();
+        int relXFromCenter = rawX - centerX;
+        int relZFromCenter = rawZ - centerZ;
 
         if (relXFromCenter > 0) {
             if (relXFromCenter >= Math.abs(relZFromCenter)) {
@@ -305,14 +308,7 @@ public class BiomeSection {
 
     @Override
     public int hashCode() {
-        int prime = 13;
-        int result = 5;
-
-        result = prime * result + x;
-        result = prime * result + z;
-        result = prime * result + tw.getName().hashCode();
-
-        return result;
+        return hash;
     }
 
     @Override
@@ -339,7 +335,8 @@ public class BiomeSection {
     }
 
     public @NotNull BiomeClimate getClimate() {
-        return BiomeClimate.selectClimate(temperature, moisture);
+        assert climate != null;
+        return climate;
     }
 
     public float getTemperature() {
@@ -355,10 +352,33 @@ public class BiomeSection {
     }
 
     public double getOceanLevel() {
-        return tw.getOceanicNoise().GetNoise(x, z) * 50.0;
+        return oceanLevel;
     }
 
     public double getMountainLevel() {
-        return tw.getMountainousNoise().GetNoise(x, z) * 50.0;
+        return mountainLevel;
+    }
+
+    private static float getDominanceScore(@NotNull BiomeSection section,
+                                           long worldSeed,
+                                           int blockX,
+                                           int blockZ,
+                                           double dither)
+    {
+        float score = section.getDominanceBasedOnRadius(blockX, blockZ);
+        if (dither == 0) {
+            return score;
+        }
+
+        return (float) (score + dither * getSectionDither(worldSeed, blockX, blockZ, section.x, section.z));
+    }
+
+    private static double getSectionDither(long worldSeed, int blockX, int blockZ, int sectionX, int sectionZ) {
+        long mixed = worldSeed;
+        mixed ^= DITHER_BLOCK_X_MULTIPLIER * blockX;
+        mixed ^= DITHER_BLOCK_Z_MULTIPLIER * blockZ;
+        mixed ^= DITHER_SECTION_X_MULTIPLIER * sectionX;
+        mixed ^= DITHER_SECTION_Z_MULTIPLIER * sectionZ;
+        return HashUtils.signedUnitDouble(HashUtils.mix64(mixed));
     }
 }

@@ -123,30 +123,34 @@ public class ElevatedPlainsHandler extends BiomeHandler {
                                  int chunkZ)
     {
 
-        int heightFactor = 15;
         int rawX = chunkX * 16 + x;
         int rawZ = chunkZ * 16 + z;
 
         double preciseHeight = HeightMap.getPreciseHeight(tw, rawX, rawZ);
         int height = (int) preciseHeight;
 
-        int noiseValue = (int) Math.round(heightFactor * getBiomeBlender(tw).getEdgeFactor(
-                BiomeBank.ELEVATED_PLAINS,
-                rawX,
-                rawZ
-        ));
+        int noiseValue = getTransformRaise(tw, rawX, rawZ);
         if (noiseValue < 1) {
             return; // If no changes are made, DO NOT TOUCH CACHE
         }
 
         for (int y = 1; y <= noiseValue; y++) {
-            chunk.setBlock(x, height + y, z, getRockAt(random, x, y, z));
+            chunk.setBlock(x, height + y, z, getTransformRockAt(random, x, y, z));
         }
         cache.writeTransformedHeight(x, z, (short) (height + noiseValue));
 
     }
 
-    private @NotNull Material getRockAt(@NotNull Random rand, int rawX, int y, int rawZ) {
+    public static int getTransformRaise(@NotNull TerraformWorld tw, int rawX, int rawZ) {
+        int heightFactor = 15;
+        return (int) Math.round(heightFactor * getBiomeBlender(tw).getEdgeFactor(
+                BiomeBank.ELEVATED_PLAINS,
+                rawX,
+                rawZ
+        ));
+    }
+
+    public static @NotNull Material getTransformRockAt(@NotNull Random rand, int rawX, int y, int rawZ) {
         return rocks[((int) Math.round(0.7 * rawX + 0.7 * (GenUtils.randInt(rand, -1, 1) + y) + 0.7 * rawZ))
                      % rocks.length];
     }

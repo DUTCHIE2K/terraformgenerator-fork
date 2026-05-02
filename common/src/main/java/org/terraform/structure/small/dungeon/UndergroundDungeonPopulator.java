@@ -25,6 +25,7 @@ import java.util.Map.Entry;
 import java.util.Random;
 
 public class UndergroundDungeonPopulator extends SmallDungeonPopulator {
+    private static final int MIN_DUNGEON_Y = 10;
 
     private static void dropDownBlock(@NotNull SimpleBlock block, @NotNull Material fluid) {
         if (block.isSolid()) {
@@ -41,6 +42,47 @@ public class UndergroundDungeonPopulator extends SmallDungeonPopulator {
 
             block.getUp().setType(type);
         }
+    }
+
+    private static boolean hasSolidBurial(@NotNull PopulatorDataAbstract data, @NotNull CubeRoom room) {
+        int minX = room.getX() - room.getWidthX() / 2;
+        int maxX = room.getX() + room.getWidthX() / 2;
+        int minY = room.getY();
+        int maxY = room.getY() + room.getHeight();
+        int minZ = room.getZ() - room.getWidthZ() / 2;
+        int maxZ = room.getZ() + room.getWidthZ() / 2;
+
+        for (int x = minX - 1; x <= maxX + 1; x++) {
+            for (int y = minY - 1; y <= maxY + 1; y++) {
+                for (int z = minZ - 1; z <= maxZ + 1; z++) {
+                    boolean insideCarvedInterior = x >= minX + 1
+                                                   && x <= maxX - 1
+                                                   && y >= minY + 1
+                                                   && y <= maxY - 1
+                                                   && z >= minZ + 1
+                                                   && z <= maxZ - 1;
+                    if (insideCarvedInterior) {
+                        continue;
+                    }
+                    if (!data.getType(x, y, z).isSolid()) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static @NotNull CubeRoom createDungeonRoom(@NotNull Random rand, int x, int y, int z) {
+        return new CubeRoom(
+                GenUtils.randOddInt(rand, 9, 15),
+                GenUtils.randOddInt(rand, 9, 15),
+                GenUtils.randInt(rand, 5, 7),
+                x,
+                y,
+                z
+        );
     }
 
     @Override
@@ -66,15 +108,31 @@ public class UndergroundDungeonPopulator extends SmallDungeonPopulator {
                 50
         );// GenUtils.getHighestGround(data, x, z)
 
-        if (y < 10) {
-            y = 10;
+        if (y < MIN_DUNGEON_Y) {
+            y = MIN_DUNGEON_Y;
         }
 
-        while (!data.getType(x, y, z).isSolid()) {
+        while (y >= MIN_DUNGEON_Y && !data.getType(x, y, z).isSolid()) {
             y--;
         }
 
-        spawnDungeonRoom(x, y, z, tw, rand, data);
+        if (y < MIN_DUNGEON_Y) {
+            return;
+        }
+
+        CubeRoom room = createDungeonRoom(rand, x, y, z);
+        while (room.getY() >= MIN_DUNGEON_Y) {
+            if (hasSolidBurial(data, room)) {
+                spawnDungeonRoom(room, tw, rand, data);
+                return;
+            }
+
+            int nextY = room.getY() - 1;
+            while (nextY >= MIN_DUNGEON_Y && !data.getType(x, nextY, z).isSolid()) {
+                nextY--;
+            }
+            room.setY(nextY);
+        }
     }
 
     public void spawnDungeonRoom(int x,
@@ -84,14 +142,18 @@ public class UndergroundDungeonPopulator extends SmallDungeonPopulator {
                                  @NotNull Random rand,
                                  @NotNull PopulatorDataAbstract data)
     {
+        spawnDungeonRoom(createDungeonRoom(rand, x, y, z), tw, rand, data);
+    }
+
+    public void spawnDungeonRoom(@NotNull CubeRoom room,
+                                 TerraformWorld tw,
+                                 @NotNull Random rand,
+                                 @NotNull PopulatorDataAbstract data)
+    {
+        int x = room.getX();
+        int y = room.getY();
+        int z = room.getZ();
         TerraformGeneratorPlugin.logger.info("Spawning Underground Dungeon at " + x + "," + y + "," + z);
-        CubeRoom room = new CubeRoom(GenUtils.randOddInt(rand, 9, 15),
-                GenUtils.randOddInt(rand, 9, 15),
-                GenUtils.randInt(rand, 5, 7),
-                x,
-                y,
-                z
-        );
         boolean isWet = false;
 
         Material fluid = Material.CAVE_AIR;

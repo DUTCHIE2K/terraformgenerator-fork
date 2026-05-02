@@ -11,28 +11,73 @@ buildscript {
     }
 }
 
+val defaultPaperImplementations = listOf(
+    "v1_18_R2",
+    "v1_19_R3",
+    "v1_20_R1",
+    "v1_20_R2",
+    "v1_20_R3",
+    "v1_20_R4",
+    "v1_21_R1",
+    "v1_21_R2",
+    "v1_21_R3",
+    "v1_21_R4",
+    "v1_21_R5",
+    "v1_21_R6",
+    "v1_21_R7",
+    "v26_1"
+)
+
+val defaultSpigotImplementations = listOf(
+    "Spigotv1_21_R6",
+    "Spigotv1_21_R7"
+)
+
+fun parseImplementationSelection(propertyName: String): List<String>? {
+    val raw = findProperty(propertyName)?.toString()?.trim().orEmpty()
+    if (raw.isEmpty()) {
+        return null
+    }
+
+    return raw.split(",")
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .distinct()
+}
+
+fun validateImplementationSelection(propertyName: String, selected: List<String>, allowed: List<String>) {
+    val unknown = selected.filter { it !in allowed }
+    require(unknown.isEmpty()) {
+        "Unknown values for -P$propertyName: ${unknown.joinToString(", ")}. " +
+        "Allowed values: ${allowed.joinToString(", ")}"
+    }
+}
+
+val selectedPaperImplementations = parseImplementationSelection("paperImplementations")
+    ?: defaultPaperImplementations
+
+val selectedSpigotImplementations = parseImplementationSelection("spigotImplementations")
+    ?: defaultSpigotImplementations
+
+validateImplementationSelection(
+    "paperImplementations",
+    selectedPaperImplementations,
+    defaultPaperImplementations
+)
+validateImplementationSelection(
+    "spigotImplementations",
+    selectedSpigotImplementations,
+    defaultSpigotImplementations
+)
+
 dependencies {
     implementation(project(":common"))
-    implementation(project(":implementation:v1_18_R2"))
-    implementation(project(":implementation:v1_19_R3"))
-    implementation(project(":implementation:v1_20_R1"))
-    implementation(project(":implementation:v1_20_R2"))
-    implementation(project(":implementation:v1_20_R3"))
-    implementation(project(":implementation:v1_20_R4"))
-    implementation(project(":implementation:v1_21_R1"))
-    implementation(project(":implementation:v1_21_R2"))
-    implementation(project(":implementation:v1_21_R3"))
-    implementation(project(":implementation:v1_21_R4"))
-    implementation(project(":implementation:v1_21_R5"))
-    implementation(project(":implementation:v1_21_R6"))
-    implementation(project(":implementation:v1_21_R7"))
-    implementation(project(":implementation:v26_1"))
+    selectedPaperImplementations.forEach { implementation(project(":implementation:$it")) }
     implementation("com.github.AvarionMC:yaml:1.1.7")
 	
 	if(project.hasProperty("includeSpigot")){
-		//Also change the one in shadowJar. Remember to have --remapped in Buildtools.
-		implementation(project(":implementation:Spigotv1_21_R6"))
-		implementation(project(":implementation:Spigotv1_21_R7"))
+		// Also change the ones in shadowJar. Remember to have --remapped in Buildtools.
+        selectedSpigotImplementations.forEach { implementation(project(":implementation:$it")) }
 	}
 }
 
@@ -45,8 +90,9 @@ tasks.shadowJar {
 
 	//Make the spigot build shadow itself
 	if(project.hasProperty("includeSpigot")){
-		dependsOn(":implementation:Spigotv1_21_R6:remap")
-		dependsOn(":implementation:Spigotv1_21_R7:remap")
+        selectedSpigotImplementations.forEach {
+            dependsOn(":implementation:$it:remap")
+        }
 	}
 
     doFirst {

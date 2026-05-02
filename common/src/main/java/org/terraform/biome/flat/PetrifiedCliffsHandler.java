@@ -24,7 +24,7 @@ import org.terraform.utils.noise.NoiseCacheHandler;
 import org.terraform.utils.noise.NoiseCacheHandler.NoiseCacheEntry;
 
 import java.util.EnumSet;
-import java.util.HashSet;
+import java.util.Arrays;
 import java.util.Random;
 
 public class PetrifiedCliffsHandler extends BiomeHandler {
@@ -163,37 +163,86 @@ public class PetrifiedCliffsHandler extends BiomeHandler {
         double preciseHeight = HeightMap.getPreciseHeight(tw, rawX, rawZ);
         int height = (int) preciseHeight;
 
+        Material[] addedTopShellMaterials = sampleAddedTopShellMaterials(tw, random, height, rawX, rawZ);
+        for (int y = 1; y <= addedTopShellMaterials.length; y++) {
+            Material material = addedTopShellMaterials[y - 1];
+            if (material != null) {
+                chunk.setBlock(x, height + y, z, material);
+                cache.writeTransformedHeight(x, z, (short) Math.max(cache.getTransformedHeight(x, z), height + y));
+            }
+        }
+    }
+
+    public static Material @NotNull [] sampleAddedTopShellMaterials(@NotNull TerraformWorld tw,
+                                                                    @NotNull Random random,
+                                                                    int baseHeight,
+                                                                    int rawX,
+                                                                    int rawZ)
+    {
+        FastNoise noise = getCliffNoise(tw);
+        FastNoise details = getDetailsNoise(tw);
+
         double noiseValue = Math.max(0, noise.GetNoise(rawX, rawZ))
                             * getBiomeBlender(tw).getEdgeFactor(BiomeBank.PETRIFIED_CLIFFS, rawX, rawZ);
         if (noiseValue == 0) {
-            return;
+            return new Material[0];
         }
 
         double platformHeight = 7 + noiseValue * 50;
-
         if (platformHeight > 15) {
             platformHeight = 15 + Math.sqrt(0.5 * (platformHeight - 15));
         }
 
-        for (int y = 1; y <= (int) Math.round(platformHeight); y++) {
+        int roundedPlatformHeight = (int) Math.round(platformHeight);
+        if (roundedPlatformHeight < 1) {
+            return new Material[0];
+        }
+
+        Material[] addedTopShellMaterials = new Material[roundedPlatformHeight];
+        int highestSolidOffset = 0;
+        for (int y = 1; y <= roundedPlatformHeight; y++) {
             double detailsNoiseMultiplier = Math.pow(1.0 - (1.0 / (Math.pow(platformHeight / 2.0, 2))) * Math.pow(
-                    y
-                    - platformHeight
-                      / 2.0,
+                    y - platformHeight / 2.0,
                     2
             ), 2);
-            double detailsNoise = details.GetNoise(rawX, height + y, rawZ);
+            double detailsNoise = details.GetNoise(rawX, baseHeight + y, rawZ);
 
             if (0.85 + detailsNoise > detailsNoiseMultiplier) {
-                chunk.setBlock(x, height + y, z, GenUtils.randChoice(Material.STONE,
+                addedTopShellMaterials[y - 1] = GenUtils.randChoice(random,
+                        Material.STONE,
                         Material.STONE,
                         Material.STONE,
                         Material.COBBLESTONE,
                         Material.MOSSY_COBBLESTONE
-                ));
-                cache.writeTransformedHeight(x, z, (short) Math.max(cache.getTransformedHeight(x, z), height + y));
+                );
+                highestSolidOffset = y;
             }
         }
+
+        if (highestSolidOffset == 0) {
+            return new Material[0];
+        }
+        return Arrays.copyOf(addedTopShellMaterials, highestSolidOffset);
+    }
+
+    private static @NotNull FastNoise getCliffNoise(@NotNull TerraformWorld tw) {
+        return NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_PETRIFIEDCLIFFS_CLIFFNOISE, world -> {
+            FastNoise n = new FastNoise(tw.getHashedRand(123, 2222, 1111).nextInt(99999));
+            n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
+            n.SetFractalOctaves(3);
+            n.SetFrequency(0.03f);
+            return n;
+        });
+    }
+
+    private static @NotNull FastNoise getDetailsNoise(@NotNull TerraformWorld tw) {
+        return NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_PETRIFIEDCLIFFS_INNERNOISE, world -> {
+            FastNoise n = new FastNoise(tw.getHashedRand(111, 102, 1).nextInt(99999));
+            n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
+            n.SetFractalOctaves(3);
+            n.SetFrequency(0.05f);
+            return n;
+        });
     }
 
     @Override

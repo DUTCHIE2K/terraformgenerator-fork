@@ -28,6 +28,22 @@ import org.terraform.utils.version.V_1_19;
 import java.util.Random;
 
 public class MangroveHandler extends BiomeHandler {
+    public static int getMudRaise(@NotNull TerraformWorld tw, int rawX, int rawZ) {
+        FastNoise mudNoise = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_SWAMP_MUDNOISE, world -> {
+            FastNoise n = new FastNoise((int) (world.getSeed() * 4));
+            n.SetNoiseType(NoiseType.SimplexFractal);
+            n.SetFrequency(0.05f);
+            n.SetFractalOctaves(4);
+
+            return n;
+        });
+
+        double noise = mudNoise.GetNoise(rawX, rawZ);
+        if (noise < 0) {
+            noise = 0;
+        }
+        return (int) Math.round(noise * 10);
+    }
 
     @Override
     public @NotNull BiomeBank getRiverType() {
@@ -74,21 +90,7 @@ public class MangroveHandler extends BiomeHandler {
         if (surfaceY < TerraformGenerator.seaLevel) {
             int rawX = chunkX * 16 + x;
             int rawZ = chunkZ * 16 + z;
-            FastNoise mudNoise = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_SWAMP_MUDNOISE, world -> {
-                FastNoise n = new FastNoise((int) (world.getSeed() * 4));
-                n.SetNoiseType(NoiseType.SimplexFractal);
-                n.SetFrequency(0.05f);
-                n.SetFractalOctaves(4);
-
-                return n;
-            });
-
-            double noise = mudNoise.GetNoise(rawX, rawZ);
-
-            if (noise < 0) {
-                noise = 0;
-            }
-            int att = (int) Math.round(noise * 10);
+            int att = getMudRaise(tw, rawX, rawZ);
             if (att + surfaceY > TerraformGenerator.seaLevel) {
                 att = TerraformGenerator.seaLevel - surfaceY;
             }

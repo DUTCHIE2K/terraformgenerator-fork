@@ -373,12 +373,6 @@ public class TConfig extends YamlFileInterface {
     @YamlComment("Collect Cave V3 timing counters for /terra timings. Leave this off unless you are profiling generation.")
     @YamlKey("dev-stuff.cave-v3-profile")
     public boolean DEVSTUFF_CAVE_V3_PROFILE = false;
-    @YamlComment("Dev-only: compare optimized Cave V3 tunnel decisions against a slow reference evaluator. Heavy CPU cost; keep disabled unless tuning cave shaping.")
-    @YamlKey("dev-stuff.cave-v3-verify-optimizer")
-    public boolean DEVSTUFF_CAVE_V3_VERIFY_OPTIMIZER = false;
-    @YamlComment("Dev-only sample rate for cave-v3 optimizer verification. 4096 means about one voxel check per 4096 considered voxels.")
-    @YamlKey("dev-stuff.cave-v3-verify-optimizer-sample-rate")
-    public int DEVSTUFF_CAVE_V3_VERIFY_OPTIMIZER_SAMPLE_RATE = 4096;
     @YamlKey("dev-stuff.force-only-vanilla-mushrooms")
     public boolean DEVSTUFF_VANILLA_MUSHROOMS = false;
     @YamlKey("dev-stuff.patcher-cache-max-size")
@@ -395,39 +389,42 @@ public class TConfig extends YamlFileInterface {
     public boolean DEVSTUFF_VANILLA_LOCATE_DISABLE = false;
 
     // -=[CAVES]=-
-    @YamlKey("caves.generator-mode")
-    public String CAVES_GENERATOR_MODE = "COMPOSITE_V3";
-    @YamlKey("caves.density-v1.frequency")
-    public float CAVES_DENSITY_V1_FREQUENCY = 0.035f;
-    @YamlKey("caves.density-v1.threshold")
-    public float CAVES_DENSITY_V1_THRESHOLD = 0.45f;
-    @YamlKey("caves.density-v1.surface-no-carve-clearance")
-    public int CAVES_DENSITY_V1_SURFACE_NO_CARVE_CLEARANCE = 8;
-    @YamlKey("caves.density-v1.surface-full-carve-clearance")
-    public int CAVES_DENSITY_V1_SURFACE_FULL_CARVE_CLEARANCE = 20;
-    @YamlKey("caves.density-v1.surface-max-threshold-penalty")
-    public float CAVES_DENSITY_V1_SURFACE_MAX_THRESHOLD_PENALTY = 0.35f;
-    @YamlKey("caves.density-v1.sea-level-column-buffer")
-    public int CAVES_DENSITY_V1_SEA_LEVEL_COLUMN_BUFFER = 6;
-    @YamlKey("caves.density-v1.sea-level-fade-depth")
-    public int CAVES_DENSITY_V1_SEA_LEVEL_FADE_DEPTH = 6;
-    @YamlKey("caves.density-v1.sea-level-max-threshold-penalty")
-    public float CAVES_DENSITY_V1_SEA_LEVEL_MAX_THRESHOLD_PENALTY = 0.25f;
-    @YamlKey("caves.density-v1.bottom-seal-enabled")
-    public boolean CAVES_DENSITY_V1_BOTTOM_SEAL_ENABLED = true;
-    @YamlKey("caves.density-v1.bottom-seal-frequency")
-    public float CAVES_DENSITY_V1_BOTTOM_SEAL_FREQUENCY = 0.02f;
-    @YamlKey("caves.density-v1.bottom-seal-min-cover")
-    public int CAVES_DENSITY_V1_BOTTOM_SEAL_MIN_COVER = 2;
-    @YamlKey("caves.density-v1.bottom-seal-noise-rise")
-    public int CAVES_DENSITY_V1_BOTTOM_SEAL_NOISE_RISE = 5;
-    @YamlKey("caves.density-v1.bottom-seal-fade-height")
-    public int CAVES_DENSITY_V1_BOTTOM_SEAL_FADE_HEIGHT = 5;
-    @YamlKey("caves.density-v1.bottom-seal-max-threshold-penalty")
-    public float CAVES_DENSITY_V1_BOTTOM_SEAL_MAX_THRESHOLD_PENALTY = 0.25f;
-    @YamlComment("How many heavy Composite V3 full-column cave prefills may run at once. Higher values can improve fresh chunk travel but use more CPU and memory.")
-    @YamlKey("caves.composite-v3.full-column-prefill-concurrency")
-    public int CAVES_COMPOSITE_V3_FULL_COLUMN_PREFILL_CONCURRENCY = 3;
+    @YamlComment("Surface clearance reserved below the terrain surface before caves may open.")
+    @YamlKey("caves.vanilla-feel.surface-clearance")
+    public int CAVES_SURFACE_CLEARANCE = 4;
+    @YamlComment("Bottom clearance reserved above world minY for caves.")
+    @YamlKey("caves.vanilla-feel.bottom-clearance")
+    public int CAVES_BOTTOM_CLEARANCE = 3;
+    @YamlComment("Allow surface-adjacent dry cave mouths when the terrain face is steep enough.")
+    @YamlKey("caves.vanilla-feel.entrances.enabled")
+    public boolean CAVES_ENTRANCES_ENABLED = true;
+    @YamlComment("Minimum blocks above sea level required before surface-adjacent cave mouths may open.")
+    @YamlKey("caves.vanilla-feel.entrances.sea-level-clearance")
+    public int CAVES_ENTRANCES_SEA_LEVEL_CLEARANCE = 4;
+    @YamlComment("Minimum cardinal drop to a neighbouring column required before a surface-adjacent cave mouth may open.")
+    @YamlKey("caves.vanilla-feel.entrances.minimum-slope-drop")
+    public int CAVES_ENTRANCES_MIN_SLOPE_DROP = 3;
+    @YamlComment("Minimum contiguous dry carved height required to support a surface-adjacent cave mouth.")
+    @YamlKey("caves.vanilla-feel.entrances.minimum-dry-carved-height")
+    public int CAVES_ENTRANCES_MIN_DRY_CARVED_HEIGHT = 4;
+    @YamlKey("caves.vanilla-feel.aquifers.enabled")
+    public boolean CAVES_AQUIFERS_ENABLED = true;
+    @YamlKey("caves.vanilla-feel.biomes.enabled")
+    public boolean CAVES_CAVE_BIOMES_ENABLED = true;
+    @YamlKey("caves.vanilla-feel.biomes.lush-frequency")
+    public float CAVES_CAVE_BIOMES_LUSH_FREQUENCY = 0.018f;
+    @YamlKey("caves.vanilla-feel.biomes.lush-threshold")
+    public float CAVES_CAVE_BIOMES_LUSH_THRESHOLD = 0.34f;
+    @YamlKey("caves.vanilla-feel.biomes.dripstone-frequency")
+    public float CAVES_CAVE_BIOMES_DRIPSTONE_FREQUENCY = 0.021f;
+    @YamlKey("caves.vanilla-feel.biomes.dripstone-threshold")
+    public float CAVES_CAVE_BIOMES_DRIPSTONE_THRESHOLD = 0.32f;
+    @YamlKey("caves.vanilla-feel.biomes.deep-dark-frequency")
+    public float CAVES_CAVE_BIOMES_DEEP_DARK_FREQUENCY = 0.02f;
+    @YamlKey("caves.vanilla-feel.biomes.deep-dark-threshold")
+    public float CAVES_CAVE_BIOMES_DEEP_DARK_THRESHOLD = 0.38f;
+    @YamlKey("caves.vanilla-feel.biomes.large-cavity-min-height")
+    public int CAVES_CAVE_BIOMES_LARGE_CAVITY_MIN_HEIGHT = 7;
     // CAVES_ALLOW_FLOODED_RAVINES("caves.allow-flooded-ravines",true),
 
     // -=[STRUCTURES]=-

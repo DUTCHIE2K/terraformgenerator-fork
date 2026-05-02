@@ -31,6 +31,76 @@ public class ErodedPlainsHandler extends BiomeHandler {
         return biomeBlender;
     }
 
+    public static ErodedPlainsColumnTransform sampleTransform(@NotNull TerraformWorld tw,
+                                                              @NotNull Random random,
+                                                              int rawTerrainY,
+                                                              int rawX,
+                                                              int rawZ)
+    {
+        FastNoise noise = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_ERODEDPLAINS_CLIFFNOISE, world -> {
+            FastNoise n = new FastNoise();
+            n.SetNoiseType(FastNoise.NoiseType.CubicFractal);
+            n.SetFractalOctaves(3);
+            n.SetFrequency(0.02f);
+            return n;
+        });
+
+        FastNoise details = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_ERODEDPLAINS_DETAILS, world -> {
+            FastNoise n = new FastNoise();
+            n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
+            n.SetFrequency(0.03f);
+            return n;
+        });
+
+        double threshold = 0.1;
+        int heightFactor = 10;
+        double noiseValue = Math.max(0, noise.GetNoise(rawX, rawZ))
+                            * getBiomeBlender(tw).getEdgeFactor(BiomeBank.ERODED_PLAINS, rawX, rawZ);
+        double detailsValue = details.GetNoise(rawX, rawZ);
+
+        double d = (noiseValue / threshold) - (int) (noiseValue / threshold) - 0.5;
+        double platformHeight = (int) (noiseValue / threshold) * heightFactor
+                                + (64 * Math.pow(d, 7) * heightFactor)
+                                + detailsValue * heightFactor * 0.5;
+
+        int roundedPlatformHeight = (int) Math.round(platformHeight);
+        int newHeight = rawTerrainY + roundedPlatformHeight;
+        if (newHeight < rawTerrainY) {
+            return null;
+        }
+
+        int raise = newHeight - rawTerrainY;
+        Material[] addedTopShellMaterials = new Material[raise];
+        for (int y = rawTerrainY + 1; y <= newHeight; y++) {
+            Material material = GenUtils.randChoice(random,
+                    Material.STONE,
+                    Material.STONE,
+                    Material.STONE,
+                    Material.STONE,
+                    Material.COBBLESTONE,
+                    Material.COBBLESTONE,
+                    Material.MOSSY_COBBLESTONE,
+                    Material.ANDESITE
+            );
+            if (slabs
+                && y == newHeight
+                && platformHeight - (int) platformHeight >= 0.5)
+            {
+                material = Material.getMaterial(material.name() + "_SLAB");
+            }
+            if (material == null) {
+                throw new IllegalStateException("Missing slab material for eroded plains top shell");
+            }
+            addedTopShellMaterials[y - rawTerrainY - 1] = material;
+        }
+
+        if (detailsValue < 0.2 && GenUtils.chance(random, 3, 4) && raise > 0) {
+            addedTopShellMaterials[raise - 1] = Material.GRASS_BLOCK;
+        }
+
+        return new ErodedPlainsColumnTransform(addedTopShellMaterials);
+    }
+
     @Override
     public boolean isOcean() {
         return plainsHandler.isOcean();
@@ -72,74 +142,26 @@ public class ErodedPlainsHandler extends BiomeHandler {
                                  int chunkX,
                                  int chunkZ)
     {
-
-        FastNoise noise = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_ERODEDPLAINS_CLIFFNOISE, world -> {
-            FastNoise n = new FastNoise();
-            n.SetNoiseType(FastNoise.NoiseType.CubicFractal);
-            n.SetFractalOctaves(3);
-            n.SetFrequency(0.02f);
-            return n;
-        });
-
-        FastNoise details = NoiseCacheHandler.getNoise(tw, NoiseCacheEntry.BIOME_ERODEDPLAINS_DETAILS, world -> {
-            FastNoise n = new FastNoise();
-            n.SetNoiseType(FastNoise.NoiseType.SimplexFractal);
-            n.SetFrequency(0.03f);
-            return n;
-        });
-
-
-        double threshold = 0.1;
-        int heightFactor = 10;
-
         int rawX = chunkX * 16 + x;
         int rawZ = chunkZ * 16 + z;
-
-        double preciseHeight = HeightMap.getPreciseHeight(tw, rawX, rawZ);
-        int height = (int) preciseHeight;
-
-        double noiseValue = Math.max(0, noise.GetNoise(rawX, rawZ))
-                            * getBiomeBlender(tw).getEdgeFactor(BiomeBank.ERODED_PLAINS, rawX, rawZ);
-        double detailsValue = details.GetNoise(rawX, rawZ);
-
-        double d = (noiseValue / threshold) - (int) (noiseValue / threshold) - 0.5;
-        double platformHeight = (int) (noiseValue / threshold) * heightFactor
-                                + (64 * Math.pow(d, 7) * heightFactor)
-                                + detailsValue * heightFactor * 0.5;
-
-        short newHeight = (short) (height + (int) Math.round(platformHeight));
-        if (newHeight < height) {
-            return; // Does not make changes if the platform is lower.
+        int rawTerrainY = (int) HeightMap.getPreciseHeight(tw, rawX, rawZ);
+        ErodedPlainsColumnTransform transform = sampleTransform(tw, random, rawTerrainY, rawX, rawZ);
+        if (transform == null) {
+            return;
         }
 
-        cache.writeTransformedHeight(x, z, (short) ((int) Math.round(platformHeight) + height));
-        for (int y = height + 1; y <= newHeight; y++) {
-            Material material = GenUtils.randChoice(Material.STONE,
-                    Material.STONE,
-                    Material.STONE,
-                    Material.STONE,
-                    Material.COBBLESTONE,
-                    Material.COBBLESTONE,
-                    Material.MOSSY_COBBLESTONE,
-                    Material.ANDESITE
-            );
-            if (slabs
-                && material != Material.GRASS_BLOCK
-                && y == newHeight
-                && platformHeight - (int) platformHeight >= 0.5)
-            {
-                material = Material.getMaterial(material.name() + "_SLAB");
-            }
-            assert material != null;
-            chunk.setBlock(x, y, z, material);
-        }
-        if (detailsValue < 0.2 && GenUtils.chance(3, 4)) {
-            chunk.setBlock(x, newHeight, z, Material.GRASS_BLOCK);
+        Material[] addedTopShellMaterials = transform.addedTopShellMaterials();
+        cache.writeTransformedHeight(x, z, (short) (rawTerrainY + addedTopShellMaterials.length));
+        for (int shellIndex = 0; shellIndex < addedTopShellMaterials.length; shellIndex++) {
+            chunk.setBlock(x, rawTerrainY + shellIndex + 1, z, addedTopShellMaterials[shellIndex]);
         }
     }
 
     @Override
     public void populateLargeItems(TerraformWorld tw, Random random, PopulatorDataAbstract data) {
         plainsHandler.populateLargeItems(tw, random, data);
+    }
+
+    public record ErodedPlainsColumnTransform(Material @NotNull [] addedTopShellMaterials) {
     }
 }

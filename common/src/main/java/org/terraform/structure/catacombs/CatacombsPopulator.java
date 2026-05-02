@@ -14,7 +14,7 @@ import org.terraform.structure.room.CubeRoom;
 import org.terraform.structure.room.RoomLayout;
 import org.terraform.structure.room.RoomLayoutGenerator;
 import org.terraform.structure.room.carver.StandardRoomCarver;
-import org.terraform.structure.room.path.CavePathWriter;
+import org.terraform.structure.room.path.StructureCavePathWriter;
 import org.terraform.structure.room.path.PathState;
 import org.terraform.utils.GenUtils;
 
@@ -116,7 +116,7 @@ public class CatacombsPopulator extends JigsawStructurePopulator {
         gen.roomCarver = new StandardRoomCarver(-1, Material.CAVE_AIR);
         gen.calculateRoomPlacement();
         PathState ps = gen.getOrCalculatePathState(tw);
-        ps.writer = new CavePathWriter(0f, 0f, 0f, 0, 2, 0);
+        ps.writer = new StructureCavePathWriter(0f, 0f, 0f, 0, 2, 0);
         gen.calculateRoomPopulators(tw);
         state.roomPopulatorStates.add(gen);
         //gen.fill(data, tw, Material.CAVE_AIR);
@@ -183,10 +183,10 @@ public class CatacombsPopulator extends JigsawStructurePopulator {
                 break; // no more stairways. Don't generate.
             }
 
-            gen.roomCarver = new StandardRoomCarver(-1, Material.CAVE_AIR);//new CaveRoomCarver(1.5f,1.7f,1.5f,0.09f,0.03f);
+            gen.roomCarver = new StandardRoomCarver(-1, Material.CAVE_AIR);//new StructureCaveRoomCarver(1.5f,1.7f,1.5f,0.09f,0.03f);
             gen.calculateRoomPlacement();
             ps = gen.getOrCalculatePathState(tw);
-            ps.writer = new CavePathWriter(0f, 0f, 0f, 0, 2, 0);
+            ps.writer = new StructureCavePathWriter(0f, 0f, 0f, 0, 2, 0);
             gen.calculateRoomPopulators(tw);
             state.roomPopulatorStates.add(gen);
             //gen.fill(data, tw, Material.CAVE_AIR);

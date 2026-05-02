@@ -15,7 +15,7 @@ import org.terraform.structure.JigsawStructurePopulator;
 import org.terraform.structure.room.CubeRoom;
 import org.terraform.structure.room.RoomLayout;
 import org.terraform.structure.room.RoomLayoutGenerator;
-import org.terraform.structure.room.path.CavePathWriter;
+import org.terraform.structure.room.path.StructureCavePathWriter;
 import org.terraform.structure.room.path.PathState;
 import org.terraform.utils.GenUtils;
 import org.terraform.utils.version.Version;
@@ -66,7 +66,7 @@ public class AncientCityPopulator extends JigsawStructurePopulator {
 
         TerraformGeneratorPlugin.logger.info("Spawning ancient city at: " + x + "," + y + "," + z);
 
-        //Cave carver
+        // Structure cave carver
         RoomLayoutGenerator carverGen = new RoomLayoutGenerator(GenUtils.RANDOMIZER, RoomLayout.RANDOM_BRUTEFORCE, 0, x,y,z, RADIUS);
         for(int nx = ((((x-RADIUS)>>4)-1)<<4) + 7; nx <= ((((x+RADIUS)>>4)+1)<<4) + 7; nx+=16)
             for(int nz = ((((z-RADIUS)>>4)-1)<<4) + 7; nz <= ((((z+RADIUS)>>4)+1)<<4) + 7; nz+=16)
@@ -106,7 +106,7 @@ public class AncientCityPopulator extends JigsawStructurePopulator {
 
         gen.calculateRoomPlacement();
         ps = gen.getOrCalculatePathState(tw);
-        ps.writer = new CavePathWriter(2f,2f,2f,0,0,0);
+        ps.writer = new StructureCavePathWriter(2f,2f,2f,0,0,0);
         gen.calculateRoomPopulators(tw);
         state.roomPopulatorStates.add(gen);
 

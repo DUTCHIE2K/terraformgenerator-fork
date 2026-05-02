@@ -36,11 +36,23 @@ gradlew buildProj:shadowJar
 
 The jar at `buildProj/build/libs/TerraformGenerator{some version}.jar` is the plugin.
 
+To build a lean jar for only specific Paper adapters, pass `-PpaperImplementations` with a comma-separated list:
+
+```bash
+gradlew buildProj:shadowJar -PpaperImplementations=v1_21_R7,v26_1
+```
+
 As for version 24.0.0, for Minecraft 1.21.9 and up, this command will only build for paper.
 
 To build for Spigot, you must:
 1. Run Buildtools with --remapped for --rev 1.21.9 (and likely for every subsequent version)
 2. Change the gradle command to `gradlew buildProj:shadowJar -PincludeSpigot=true`
+
+You can also limit the shaded Spigot adapters:
+
+```bash
+gradlew buildProj:shadowJar -PincludeSpigot=true -PspigotImplementations=Spigotv1_21_R7
+```
 
 If this gets too cumbersome, the buildscript may be changed to allowed a flag for building just the latest version.
 

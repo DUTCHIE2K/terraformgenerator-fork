@@ -1,10 +1,11 @@
 package org.terraform.coregen;
 
 import org.bukkit.Material;
+import org.bukkit.block.BlockFace;
 import org.bukkit.generator.BlockPopulator;
 import org.jetbrains.annotations.NotNull;
 import org.terraform.biome.BiomeBank;
-import org.terraform.biome.cavepopulators.MasterCavePopulatorDistributor;
+import org.terraform.biome.cavepopulators.AmbientCaveDecorationDistributor;
 import org.terraform.cave.v3.CaveV3Profiler;
 import org.terraform.cave.v3.CaveSnapshotStoreV3;
 import org.terraform.cave.v3.CaveSnapshotV3;
@@ -17,9 +18,11 @@ import org.terraform.main.TerraformGeneratorPlugin;
 import org.terraform.main.config.TConfig;
 import org.terraform.populators.AmethystGeodePopulator;
 import org.terraform.populators.OrePopulator;
+import org.terraform.populators.VanillaFeelOreVeinPopulator;
 import org.terraform.structure.MultiMegaChunkStructurePopulator;
 import org.terraform.structure.StructureBufferDistanceHandler;
 import org.terraform.structure.StructureRegistry;
+import org.terraform.utils.BlockUtils;
 import org.terraform.utils.GenUtils;
 
 import java.util.EnumSet;
@@ -201,7 +204,8 @@ public class TerraformPopulator extends BlockPopulator {
             TConfig.c.ORE_AMETHYST_MIN_DEPTH,
             TConfig.c.ORE_AMETHYST_MIN_DEPTH_BELOW_SURFACE
     );
-    private final MasterCavePopulatorDistributor caveDistributor = new MasterCavePopulatorDistributor();
+    private final VanillaFeelOreVeinPopulator vanillaFeelOreVeinPopulator = new VanillaFeelOreVeinPopulator();
+    private final AmbientCaveDecorationDistributor ambientCaveDecorationDistributor = new AmbientCaveDecorationDistributor();
 
     @Override
     public void populate(@NotNull org.bukkit.generator.WorldInfo worldInfo,
@@ -222,6 +226,7 @@ public class TerraformPopulator extends BlockPopulator {
         for (OrePopulator ore : ORE_POPS) {
             ore.populate(tw, random, data);
         }
+        vanillaFeelOreVeinPopulator.populate(tw, random, data);
         
         // Get all biomes in a chunk
         EnumSet<BiomeBank> banks = EnumSet.noneOf(BiomeBank.class);
@@ -239,6 +244,10 @@ public class TerraformPopulator extends BlockPopulator {
                 BiomeBank bank = tw.getBiomeBank(rawX, surfaceY, rawZ);
                 banks.add(bank);
 
+                if (surfaceY < TerraformGenerator.seaLevel && data.getType(rawX, surfaceY + 1, rawZ) == Material.WATER) {
+                    repairSubmergedWaterContainment(rawX, surfaceY, rawZ, data);
+                }
+
                 // Don't populate wet stuff in places that aren't wet
                 if (!bank.isDry() && data.getType(rawX, surfaceY + 1, rawZ) != Material.WATER) {
                     continue;
@@ -255,8 +264,8 @@ public class TerraformPopulator extends BlockPopulator {
         }
 
 
-        // Cave populators
-        // They will recalculate biomes per block.
+        // Ambient cave decoration
+        // Biomes are recalculated per block from the cave snapshot.
         CaveSnapshotV3 snapshotV3 = CaveSnapshotStoreV3.takeGameplay(tw, data.getChunkX(), data.getChunkZ());
         if (snapshotV3 == null) {
             ChunkCache cache = TerraformGenerator.getCache(tw, data.getChunkX(), data.getChunkZ());
@@ -264,16 +273,12 @@ public class TerraformPopulator extends BlockPopulator {
                 CaveV3Profiler.recordEvent("cave-v3.populate.snapshot-cache-hit");
                 snapshotV3 = cache.getGameplaySnapshotV3();
             }
-            else if (cache.hasCompositeV3ChunkPrefill()) {
-                CaveV3Profiler.recordEvent("cave-v3.populate.snapshot-prefill-hit");
-                snapshotV3 = cache.getCompositeV3ChunkPrefill().toSnapshot(data.getChunkX(), data.getChunkZ());
-            }
         }
         if (snapshotV3 == null) {
             logMissingCaveSnapshot(tw, data);
         }
         else {
-            caveDistributor.populate(tw, random, data, canDecorate[1], snapshotV3);
+            ambientCaveDecorationDistributor.populate(tw, random, data, canDecorate[1], snapshotV3);
         }
 
         // Multi-megachunk structures
@@ -306,5 +311,40 @@ public class TerraformPopulator extends BlockPopulator {
                                                   + chunkInfo
                                                   + ". Ambient cave decoration was skipped.");
         }
+    }
+
+    /**
+     * Seal side openings where surface water spills into unsupported cave air.
+     * This runs after terrain generation, so it fixes legacy/shared artifacts without affecting height truth.
+     */
+    private static void repairSubmergedWaterContainment(int rawX,
+                                                        int surfaceY,
+                                                        int rawZ,
+                                                        @NotNull PopulatorDataAbstract data)
+    {
+        Material sealMaterial = getWaterContainmentMaterial(data.getType(rawX, surfaceY, rawZ));
+        for (int y = surfaceY + 1; y <= TerraformGenerator.seaLevel; y++) {
+            if (data.getType(rawX, y, rawZ) != Material.WATER) {
+                continue;
+            }
+
+            for (BlockFace face : BlockUtils.directBlockFaces) {
+                int relX = rawX + face.getModX();
+                int relZ = rawZ + face.getModZ();
+                if (BlockUtils.isAir(data.getType(relX, y, relZ))) {
+                    data.setType(relX, y, relZ, sealMaterial);
+                }
+            }
+        }
+    }
+
+    private static @NotNull Material getWaterContainmentMaterial(@NotNull Material surfaceMaterial) {
+        return switch (surfaceMaterial) {
+            case SAND -> Material.SANDSTONE;
+            case RED_SAND -> Material.RED_SANDSTONE;
+            case GRASS_BLOCK, PODZOL, MYCELIUM, COARSE_DIRT, DIRT, ROOTED_DIRT, DIRT_PATH -> Material.DIRT;
+            case GRAVEL -> Material.STONE;
+            default -> surfaceMaterial.isSolid() ? surfaceMaterial : Material.STONE;
+        };
     }
 }
